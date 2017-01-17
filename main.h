@@ -57,7 +57,7 @@ const double BorderForce = 1 / (0.75 * 0.75 * 0.75 * 0.75 * 0.75 * 0.75) - 1 / 0
 const int range = 5;
 
 #define CRADIUS 5.0
-#define N 1000
+#define N 500
 
 
 void SaveVTKImage(vtkImageData *image, const char* fileName);
