@@ -204,6 +204,7 @@ public:
 			if (ClickCount > 0.0)
 			{
 				connectionCellArray->Reset();
+				relationships.clear();
 
 				for (vtkIdType i = 0; i < SamplePoints->GetNumberOfPoints(); i++)
 				{
@@ -238,29 +239,35 @@ public:
 				// refine connections
 				for (vtkIdType i = 0; i < SamplePoints->GetNumberOfPoints(); i++)
 					for (int idj = 0; idj < connections[i].size(); idj++)
+				{
+					vtkIdType j = connections[i].at(idj);
+					bool flag_iinjfile = false;
+					for (int idk = 0; idk < connections[j].size(); idk++)
 					{
-						vtkIdType j = connections[i].at(idj);
-						bool flag_iinjfile = false;
-						for (int idk = 0; idk < connections[j].size(); idk++)
+						if (i == connections[j].at(idk))
 						{
-							if (i == connections[j].at(idk))
-							{
-								flag_iinjfile = true;
-								break;
-							}
+							flag_iinjfile = true;
+							break;
 						}
-						if (flag_iinjfile == false)
-							connections[j].push_back(i);
 					}
+					if (flag_iinjfile == false)
+						connections[j].push_back(i);
+				}
 
 				for (vtkIdType i = 0; i < SamplePoints->GetNumberOfPoints(); i++)
 					for (int idj = 0; idj < connections[i].size(); idj++)
 					{
 						vtkIdType j = connections[i].at(idj);
+						if (j <= i)	continue;
 						vtkSmartPointer<vtkLine> line = vtkSmartPointer<vtkLine>::New();
 						line->GetPointIds()->SetId(0, i);
 						line->GetPointIds()->SetId(1, j);
 						connectionCellArray->InsertNextCell(line);
+
+						vector<vtkIdType> thisconnection;
+						thisconnection.push_back(i);
+						thisconnection.push_back(j);
+						relationships.push_back(thisconnection);
 					}
 
 				connectionCellArray->Modified();
@@ -271,14 +278,43 @@ public:
 			SampleCell->Modified();
 			SamplePoly->Modified();
 			renderWindow->Render();
-
 		}
+
+	//	std::cout << "connectionCellArray = " << connectionCellArray->GetNumberOfCells() << ", relationships = " << relationships.size() << std::endl;
 		std::cout << ClickCount << " calculation is done" << std::endl;
+	}
 
-	//	SavePolyData(connectionPolyData, "C:\\work\\smooth_deformation_3D\\testdata\\connectionPolyData.vtp");
+	virtual void OnKeyPress()
+	{
+		std::string key = this->Interactor->GetKeySym();
+		
+		if (key == "b")
+		{
+			for (vtkIdType r = 0; r < relationships.size(); r++)
+			{
+				double coord1[3], coord2[3];
+				SamplePoly->GetPoint(relationships[r][0], coord1);
+				SamplePoly->GetPoint(relationships[r][1], coord2);
+				
+				vector<double> thisparam;
+				double dis = sqrt(vtkMath::Distance2BetweenPoints(coord1, coord2));
+				thisparam.push_back(dis);
+				double forcescale = 1.0; // should be different for different parts
+				thisparam.push_back(forcescale);
 
-		// forward events
-	//	vtkInteractorStyleTrackballCamera::OnRightButtonDown();
+				parameters.push_back(thisparam);
+			}
+		}
+		else if (key == "g")
+		{
+			if (relationships.size() == 0)
+				return;
+			if (relationships.size() != parameters.size())
+				return;
+
+
+
+		}		
 	}
 
 public:
@@ -301,6 +337,10 @@ public:
 	vtkDoubleArray* R;	// radius
 	vtkDoubleArray* F_sumabs;	// force with respect to other points
 	vtkDoubleArray* F_abssum;	// force with respect to other points
+
+	vector< vector<vtkIdType> > relationships; // each one has two points ids.
+	vector< vector<double> > parameters; // each one has some parameters for calculating forces
+
 
 	vtkPolyData* connectionPolyData;
 	vtkCellArray* connectionCellArray;
