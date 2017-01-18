@@ -38,6 +38,7 @@
 #include <vtkPlane.h>
 #include <vtkKdTree.h>
 #include <vtkPolyDataNormals.h>
+#include <vtkFloatArray.h>
 
 
 using namespace std;
@@ -46,7 +47,7 @@ using namespace std;
 
 #define CLRADIUS 1.5
 #define  CIRCILEPOINTNUM 30
-#define  R_INITIAL 0.05
+#define  R_INITIAL 0.25
 #define  TH_F 5
 #define  Hardness 2.0
 #define POINTMASS 100.0
@@ -57,7 +58,7 @@ const double BorderForce = 1 / (0.75 * 0.75 * 0.75 * 0.75 * 0.75 * 0.75) - 1 / 0
 const int range = 5;
 
 #define CRADIUS 5.0
-#define N 500
+#define N 300
 
 
 void SaveVTKImage(vtkImageData *image, const char* fileName);

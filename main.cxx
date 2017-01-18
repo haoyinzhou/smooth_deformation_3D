@@ -65,10 +65,10 @@ public:
 
 	virtual void OnRightButtonDown()
 	{
-		ClickCount ++;
+		ClickCount++;
 
-		SavePolyData(BoundaryPoly, "C:\\work\\smooth_deformation_3D\\testdata\\BoundaryPoly.vtp");
-		vtkDoubleArray* BoundaryNormalArray = vtkDoubleArray::SafeDownCast(BoundaryPoly->GetPointData()->GetArray("Normals"));
+	//	SavePolyData(BoundaryPoly, "C:\\work\\smooth_deformation_3D\\testdata\\BoundaryPoly.vtp");
+		vtkFloatArray* BoundaryNormalArray = vtkFloatArray::SafeDownCast(BoundaryPoly->GetPointData()->GetArray("Normals"));
 		if (BoundaryNormalArray == NULL)
 		{
 			std::cerr << "cannot find BoundaryNormalArray" << std::endl;
@@ -79,131 +79,8 @@ public:
 
 		vector< vector<vtkIdType> > connections(SamplePoints->GetNumberOfPoints());
 
-		for (vtkIdType i = 0; i < SamplePoints->GetNumberOfPoints(); i ++)
+		for (int iter = 0; iter < 10; iter ++)
 		{
-			if (pointflag->GetValue(i) == 0) continue;
-			double coordi[3];
-			SamplePoints->GetPoint(i, coordi);
-			double Ri = R->GetValue(i);
-
-			double diri[3] = {0.0, 0.0, 0.0};
-			for (int l = 0; l < 3; l ++) diri[l] = coordi[l];
-			vtkMath::Normalize(diri);
-	
-			double Fi[3] = {0.0, 0.0, 0.0};
-			double Fi_c[3] = {0.0, 0.0, 0.0};
-			double Fi_p[3] = {0.0, 0.0, 0.0};
-
-			// force between center and this point
-			{
-				vtkIdType nearestboundaryPID = boundarypointLocator->FindClosestPoint(coordi);
-				double boundarycoord[3];
-				BoundaryPoly->GetPoint(nearestboundaryPID, boundarycoord);
-				double dir_p2boundary[3];
-				vtkMath::Subtract(boundarycoord, coordi, dir_p2boundary);
-				vtkMath::Normalize(dir_p2boundary);
-				double boundarynormal[3];
-				BoundaryNormalArray->GetTuple(nearestboundaryPID, boundarynormal);
-
-				double F_mode_c = 0.0;
-				if (vtkMath::Dot(dir_p2boundary, boundarynormal) < 0)
-					F_mode_c = 0.0;
-				else
-					F_mode_c = -10.0;
-
-				for (int l = 0; l < 3; l ++) Fi_c[l] += F_mode_c * diri[l];
-			}
-		 
-			// force between points
-			double Fpi_abssum = 0.0;
-			double Fpi_sumabs = 0.0;
-			vtkSmartPointer<vtkIdList> NeighorpIds = vtkSmartPointer<vtkIdList>::New(); 
-			//pointLocator->FindPointsWithinRadius(4.0, coordi, NeighorpIds);
-			pointLocator->FindClosestNPoints(20, coordi, NeighorpIds);
-
-			for (int idxj = 0; idxj < NeighorpIds->GetNumberOfIds(); idxj ++)
-			{
-				vtkIdType j = NeighorpIds->GetId(idxj);
-				if (i == j) continue;
-
-				double coordj[3];
-				SamplePoints->GetPoint(j, coordj);
-
-				double dir[3];
-				vtkMath::Subtract(coordi, coordj, dir);
-				double dis = vtkMath::Norm(dir);
-				vtkMath::Normalize(dir);
-				
-				double Rj = R->GetValue(j);
-				double R_total = Ri + Rj;
-
-				if (dis < 0.55 * R_total)
-				{	
-					double temp = 0.5 / R_total * dis + 0.5;
-					double Fij_p_mode = ( 1.0 / (temp*temp*temp*temp*temp*temp) - 1.0 / (temp));
-					double Fij_p[3] = {0.0, 0.0, 0.0};
-					for (int l = 0; l < 3; l ++) Fij_p[l] = Fij_p_mode * dir[l];
-					for (int l = 0; l < 3; l ++) Fi_p[l] += Fij_p[l];
-					Fpi_sumabs += vtkMath::Norm(Fij_p);
-
-				//	connections[i].push_back(j);
-				}
-			}
-
-			Fpi_abssum = vtkMath::Norm(Fi_p);
-			
-			// combine Fi_cl and Fi_p
-			for (int l = 0; l < 3; l ++) Fi[l] = 100.0 * Fi_c[l] + 1.0 * Fi_p[l];
-
-			// move points based on force
-			if (vtkMath::Norm(Fi) > 10.0)
-			{
-				vtkMath::Normalize(Fi);						
-				for (int l = 0; l < 3; l ++) Fi[l] = 10.0 * Fi[l];
-			}
-			double coordi_new[3];
-			for (int l = 0; l < 3; l ++) coordi_new[l] = coordi[l] + Fi[l] / POINTMASS * TIMESTEP;
-			//coordi_new[2] = 0.0; 
-
-			SamplePoints->SetPoint(i, coordi_new);
-			F_abssum->SetValue(i, Fpi_abssum);
-			F_sumabs->SetValue(i, Fpi_sumabs);
-		}
-
-		// update radius Ri
-		//double meanR = CRADIUS * CRADIUS / SamplePoints->GetNumberOfPoints();
-		for (int i = 0; i < SamplePoints->GetNumberOfPoints(); i ++)
-		{
-			if (pointflag->GetValue(i) == 0)
-				continue;
-
-			double Ri = R->GetValue(i);
-			double delta_Ri_Max = 1.0 * TIMESTEP;
-
-			double delta_Ri = delta_Ri_Max;
-			double CondenseForce = F_sumabs->GetValue(i) - F_abssum->GetValue(i) - 5.5 * BorderForce; // 6 means hexagon grid mesh
-			//	delta_Ri = (delta_Ri_Max + 1.0 - 0.1 * exp(CondenseForce / Hardness)) * timestep;	
-			double temp = 1.0 + 0.003 * CondenseForce;
-			if (temp <= 0.05)
-				delta_Ri = delta_Ri_Max;
-			else
-				delta_Ri = -log(temp) * TIMESTEP;	
-			if (delta_Ri > delta_Ri_Max)
-				delta_Ri = delta_Ri_Max;
-
-			Ri += delta_Ri;	 
-			Ri = Ri < 0.05? 0.05 : Ri;
-			Ri = Ri > 10.0? 10.0 : Ri;
-
-			R->SetValue(i, Ri);
-		}		
-
-		// draw the connections
-		if (ClickCount > 00.0)
-		{
-			std::cout << "ClickCount > 00.0" << std::endl;
-			connectionCellArray->Reset();
-
 			for (vtkIdType i = 0; i < SamplePoints->GetNumberOfPoints(); i++)
 			{
 				if (pointflag->GetValue(i) == 0) continue;
@@ -211,6 +88,37 @@ public:
 				SamplePoints->GetPoint(i, coordi);
 				double Ri = R->GetValue(i);
 
+				double diri[3] = { 0.0, 0.0, 0.0 };
+				for (int l = 0; l < 3; l++) diri[l] = coordi[l];
+				vtkMath::Normalize(diri);
+
+				double Fi[3] = { 0.0, 0.0, 0.0 };
+				double Fi_c[3] = { 0.0, 0.0, 0.0 };
+				double Fi_p[3] = { 0.0, 0.0, 0.0 };
+
+				// force between center and this point
+				{
+					vtkIdType nearestboundaryPID = boundarypointLocator->FindClosestPoint(coordi);
+					double boundarycoord[3];
+					BoundaryPoly->GetPoint(nearestboundaryPID, boundarycoord);
+					double dir_p2boundary[3];
+					vtkMath::Subtract(boundarycoord, coordi, dir_p2boundary);
+					vtkMath::Normalize(dir_p2boundary);
+					double boundarynormal[3];
+					BoundaryNormalArray->GetTuple(nearestboundaryPID, boundarynormal);
+
+					double F_mode_c = 0.0;
+					if (vtkMath::Dot(dir_p2boundary, boundarynormal) > 0)
+						F_mode_c = 0.0;
+					else
+						F_mode_c = -10.0;
+
+					for (int l = 0; l < 3; l++) Fi_c[l] += F_mode_c * diri[l];
+				}
+
+				// force between points
+				double Fpi_abssum = 0.0;
+				double Fpi_sumabs = 0.0;
 				vtkSmartPointer<vtkIdList> NeighorpIds = vtkSmartPointer<vtkIdList>::New();
 				//pointLocator->FindPointsWithinRadius(4.0, coordi, NeighorpIds);
 				pointLocator->FindClosestNPoints(20, coordi, NeighorpIds);
@@ -226,51 +134,145 @@ public:
 					double dir[3];
 					vtkMath::Subtract(coordi, coordj, dir);
 					double dis = vtkMath::Norm(dir);
+					vtkMath::Normalize(dir);
 
 					double Rj = R->GetValue(j);
 					double R_total = Ri + Rj;
 
-					if (dis < 0.65 * R_total)
-						connections[i].push_back(j);
-				}
-			}
-			// refine connections
-			for (vtkIdType i = 0; i < SamplePoints->GetNumberOfPoints(); i ++)
-				for (int idj = 0; idj < connections[i].size(); idj ++)
-			{
-				vtkIdType j = connections[i].at(idj);
-				bool flag_iinjfile = false;
-				for (int idk = 0; idk < connections[j].size(); idk ++)
-				{
-					if (i == connections[j].at(idk))
+					if (dis < 0.55 * R_total)
 					{
-						flag_iinjfile = true;
-						break;
+						double temp = 0.5 / R_total * dis + 0.5;
+						double Fij_p_mode = (1.0 / (temp*temp*temp*temp*temp*temp) - 1.0 / (temp));
+						double Fij_p[3] = { 0.0, 0.0, 0.0 };
+						for (int l = 0; l < 3; l++) Fij_p[l] = Fij_p_mode * dir[l];
+						for (int l = 0; l < 3; l++) Fi_p[l] += Fij_p[l];
+						Fpi_sumabs += vtkMath::Norm(Fij_p);
+
+						//	connections[i].push_back(j);
 					}
 				}
-				if (flag_iinjfile == false)
-					connections[j].push_back(i);
+
+				Fpi_abssum = vtkMath::Norm(Fi_p);
+
+				// combine Fi_cl and Fi_p
+				for (int l = 0; l < 3; l++) Fi[l] = 100.0 * Fi_c[l] + 1.0 * Fi_p[l];
+
+				// move points based on force
+				if (vtkMath::Norm(Fi) > 10.0)
+				{
+					vtkMath::Normalize(Fi);
+					for (int l = 0; l < 3; l++) Fi[l] = 10.0 * Fi[l];
+				}
+				double coordi_new[3];
+				for (int l = 0; l < 3; l++) coordi_new[l] = coordi[l] + Fi[l] / POINTMASS * TIMESTEP;
+				//coordi_new[2] = 0.0; 
+
+				SamplePoints->SetPoint(i, coordi_new);
+				F_abssum->SetValue(i, Fpi_abssum);
+				F_sumabs->SetValue(i, Fpi_sumabs);
 			}
-		
-			for (vtkIdType i = 0; i < SamplePoints->GetNumberOfPoints(); i ++)
-				for (int idj = 0; idj < connections[i].size(); idj ++)
+
+			// update radius Ri
+			//double meanR = CRADIUS * CRADIUS / SamplePoints->GetNumberOfPoints();
+			for (int i = 0; i < SamplePoints->GetNumberOfPoints(); i++)
 			{
-				vtkIdType j = connections[i].at(idj);
-				vtkSmartPointer<vtkLine> line = vtkSmartPointer<vtkLine>::New();
-				line->GetPointIds()->SetId(0, i); 
-				line->GetPointIds()->SetId(1, j);
-				connectionCellArray->InsertNextCell(line);
+				if (pointflag->GetValue(i) == 0)
+					continue;
+
+				double Ri = R->GetValue(i);
+				double delta_Ri_Max = 1.0 * TIMESTEP;
+
+				double delta_Ri = delta_Ri_Max;
+				double CondenseForce = F_sumabs->GetValue(i) - F_abssum->GetValue(i) - 5.5 * BorderForce; // 6 means hexagon grid mesh
+				//	delta_Ri = (delta_Ri_Max + 1.0 - 0.1 * exp(CondenseForce / Hardness)) * timestep;	
+				double temp = 1.0 + 0.003 * CondenseForce;
+				if (temp <= 0.05)
+					delta_Ri = delta_Ri_Max;
+				else
+					delta_Ri = -log(temp) * TIMESTEP;
+				if (delta_Ri > delta_Ri_Max)
+					delta_Ri = delta_Ri_Max;
+
+				Ri += delta_Ri;
+				Ri = Ri < 0.05 ? 0.05 : Ri;
+				Ri = Ri > 10.0 ? 10.0 : Ri;
+
+				R->SetValue(i, Ri);
 			}
 
-			connectionCellArray->Modified();
-			connectionPolyData->Modified();
+			// draw the connections
+			if (ClickCount > 0.0)
+			{
+				connectionCellArray->Reset();
+
+				for (vtkIdType i = 0; i < SamplePoints->GetNumberOfPoints(); i++)
+				{
+					if (pointflag->GetValue(i) == 0) continue;
+					double coordi[3];
+					SamplePoints->GetPoint(i, coordi);
+					double Ri = R->GetValue(i);
+
+					vtkSmartPointer<vtkIdList> NeighorpIds = vtkSmartPointer<vtkIdList>::New();
+					//pointLocator->FindPointsWithinRadius(4.0, coordi, NeighorpIds);
+					pointLocator->FindClosestNPoints(20, coordi, NeighorpIds);
+
+					for (int idxj = 0; idxj < NeighorpIds->GetNumberOfIds(); idxj++)
+					{
+						vtkIdType j = NeighorpIds->GetId(idxj);
+						if (i == j) continue;
+
+						double coordj[3];
+						SamplePoints->GetPoint(j, coordj);
+
+						double dir[3];
+						vtkMath::Subtract(coordi, coordj, dir);
+						double dis = vtkMath::Norm(dir);
+
+						double Rj = R->GetValue(j);
+						double R_total = Ri + Rj;
+
+						if (dis < 0.60 * R_total)
+							connections[i].push_back(j);
+					}
+				}
+				// refine connections
+				for (vtkIdType i = 0; i < SamplePoints->GetNumberOfPoints(); i++)
+					for (int idj = 0; idj < connections[i].size(); idj++)
+					{
+						vtkIdType j = connections[i].at(idj);
+						bool flag_iinjfile = false;
+						for (int idk = 0; idk < connections[j].size(); idk++)
+						{
+							if (i == connections[j].at(idk))
+							{
+								flag_iinjfile = true;
+								break;
+							}
+						}
+						if (flag_iinjfile == false)
+							connections[j].push_back(i);
+					}
+
+				for (vtkIdType i = 0; i < SamplePoints->GetNumberOfPoints(); i++)
+					for (int idj = 0; idj < connections[i].size(); idj++)
+					{
+						vtkIdType j = connections[i].at(idj);
+						vtkSmartPointer<vtkLine> line = vtkSmartPointer<vtkLine>::New();
+						line->GetPointIds()->SetId(0, i);
+						line->GetPointIds()->SetId(1, j);
+						connectionCellArray->InsertNextCell(line);
+					}
+
+				connectionCellArray->Modified();
+				connectionPolyData->Modified();
+			}
+
+			SamplePoints->Modified();
+			SampleCell->Modified();
+			SamplePoly->Modified();
+			renderWindow->Render();
+
 		}
-
-		SamplePoints->Modified();
-		SampleCell->Modified();
-		SamplePoly->Modified();
-		renderWindow->Render();
-
 		std::cout << ClickCount << " calculation is done" << std::endl;
 
 	//	SavePolyData(connectionPolyData, "C:\\work\\smooth_deformation_3D\\testdata\\connectionPolyData.vtp");
@@ -327,14 +329,14 @@ int main(int argc, char *argv[])
 	
 	// generate initial SamplePoints
 	vtkSmartPointer<vtkPoints> SamplePoints = vtkSmartPointer<vtkPoints>::New();
-	for (int i = 0; i < N; i ++)
+	for (int i = 0; i < N; )
 	{
 		double coordi[3] = {0.0, 0.0, 0.0};
 		coordi[0] = vtkMath::Random(-CRADIUS, CRADIUS);
 		coordi[1] = vtkMath::Random(-CRADIUS, CRADIUS);
 		coordi[2] = vtkMath::Random(-CRADIUS, CRADIUS);
 		if (vtkMath::Norm(coordi) > CRADIUS) continue;
-
+		i ++;
 		SamplePoints->InsertNextPoint(coordi);
 	}
 
@@ -418,7 +420,8 @@ int main(int argc, char *argv[])
 	vtkSmartPointer<vtkActor> actor1 = vtkSmartPointer<vtkActor>::New();
 	actor1->SetMapper(mapper1);
 	actor1->GetProperty()->SetColor(0.0, 0.0, 1.0); //(R,G,B)
-	//renderer->AddActor(actor1);
+	actor1->GetProperty()->SetOpacity(0.1);
+	renderer->AddActor(actor1);
 
 	vtkSmartPointer<vtkPolyDataMapper> mapper2 =	vtkSmartPointer<vtkPolyDataMapper>::New();
 	mapper2->SetInputData(connectionPolyData); 
