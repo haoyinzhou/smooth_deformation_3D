@@ -58,6 +58,9 @@ public:
 
 	MouseInteractorStyle() 
 	{
+		isBoundaryPoint = vtkSmartPointer<vtkIdTypeArray>::New();
+		isBoundaryPoint->SetName("isBoundaryPoint");
+		isBoundaryPoint->SetNumberOfComponents(1);
 	}
 	~MouseInteractorStyle()
 	{
@@ -280,7 +283,7 @@ public:
 			renderWindow->Render();
 		}
 
-	//	std::cout << "connectionCellArray = " << connectionCellArray->GetNumberOfCells() << ", relationships = " << relationships.size() << std::endl;
+		std::cout << "connectionCellArray = " << connectionCellArray->GetNumberOfCells() << ", relationships = " << relationships.size() << std::endl;
 		std::cout << ClickCount << " calculation is done" << std::endl;
 	}
 
@@ -288,9 +291,11 @@ public:
 	{
 		std::string key = this->Interactor->GetKeySym();
 		
-		if (key == "b")
+		if (key == "d")
 		{
-			for (vtkIdType r = 0; r < relationships.size(); r++)
+			parameters.clear();
+
+			for (int r = 0; r < relationships.size(); r ++)
 			{
 				double coord1[3], coord2[3];
 				SamplePoly->GetPoint(relationships[r][0], coord1);
@@ -304,6 +309,36 @@ public:
 
 				parameters.push_back(thisparam);
 			}
+			
+			if (SamplePoly->GetPointData()->HasArray("isBoundaryPoint"))
+				SamplePoly->GetPointData()->RemoveArray("isBoundaryPoint");
+
+			isBoundaryPoint = vtkSmartPointer<vtkIdTypeArray>::New();
+			isBoundaryPoint->SetName("isBoundaryPoint");
+			isBoundaryPoint->SetNumberOfComponents(1);
+
+			for (vtkIdType i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
+			{
+				if (pointflag->GetValue(i) == 0) continue;
+				double coordi[3];
+				SamplePoly->GetPoint(i, coordi);
+
+				vtkIdType nearestboundaryPID = boundarypointLocator->FindClosestPoint(coordi);
+				double boundarycoord[3];
+				BoundaryPoly->GetPoint(nearestboundaryPID, boundarycoord);
+				double dir_p2boundary[3];
+				vtkMath::Subtract(boundarycoord, coordi, dir_p2boundary);
+				double dis_p2boundary = vtkMath::Norm(dir_p2boundary);
+
+				if (dis_p2boundary < 5e-1)
+					isBoundaryPoint->InsertNextValue(1);
+				else
+					isBoundaryPoint->InsertNextValue(0);
+			}
+			SamplePoly->GetPointData()->AddArray(isBoundaryPoint);
+			std::cout << "isBoundaryPoint.num = " << isBoundaryPoint->GetNumberOfTuples() << std::endl;
+		//	SavePolyData(SamplePoly, "C:\\work\\smooth_deformation_3D\\testdata\\SamplePoly.vtp");
+
 		}
 		else if (key == "g")
 		{
@@ -311,8 +346,24 @@ public:
 				return;
 			if (relationships.size() != parameters.size())
 				return;
+			if (isBoundaryPoint->GetNumberOfTuples() == 0)
+				return;
+
+			std::cout << "relationship = " << relationships.size() << ", parameter = " << parameters.size() << std::endl;
+
+			for (int i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
+			{
+				vector<double> forcei;
+				for (int l = 0; l < 3; l++) forcei.push_back(0.0);
+				forces.push_back(forcei);
+			}
+			
+			for (int r = 0; r < relationships.size(); r++)
+			{
+				
 
 
+			}
 
 		}		
 	}
@@ -326,8 +377,7 @@ public:
 	
 	// boundary
 	vtkPolyData* BoundaryPoly;
-	vtkPointLocator* boundarypointLocator;
-	
+	vtkPointLocator* boundarypointLocator;	
 	
 	// p
 	vtkPointLocator* pointLocator;
@@ -337,9 +387,12 @@ public:
 	vtkDoubleArray* R;	// radius
 	vtkDoubleArray* F_sumabs;	// force with respect to other points
 	vtkDoubleArray* F_abssum;	// force with respect to other points
+	vtkSmartPointer<vtkIdTypeArray> isBoundaryPoint;
+
 
 	vector< vector<vtkIdType> > relationships; // each one has two points ids.
 	vector< vector<double> > parameters; // each one has some parameters for calculating forces
+	vector< vector<double> > forces;		// forces used in phrase 2
 
 
 	vtkPolyData* connectionPolyData;
