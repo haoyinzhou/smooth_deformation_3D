@@ -408,16 +408,11 @@ public:
 				double coordi[3];
 				SamplePoly->GetPoint(i, coordi);
 				for (int l = 0; l < 3; l++) coordi[l] = coordi[l] + Fi[l] / POINTMASS * TIMESTEP;
+				std::cout << Fi[0] << ", " << Fi[1] << ", " << Fi[2] << std::endl;
 				//coordi_new[2] = 0.0; 
 				SamplePoly->GetPoints()->SetPoint(i, coordi);
 			}
 
-			for (int i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
-			{
-
-
-
-			}
 
 
 			SamplePoly->Modified();
