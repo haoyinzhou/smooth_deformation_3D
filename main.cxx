@@ -351,7 +351,7 @@ public:
 
 			std::cout << "relationship = " << relationships.size() << ", parameter = " << parameters.size() << std::endl;
 
-			for (int i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
+			for (int i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i ++)
 			{
 				vector<double> forcei;
 				for (int l = 0; l < 3; l++) forcei.push_back(0.0);
@@ -360,11 +360,68 @@ public:
 			
 			for (int r = 0; r < relationships.size(); r++)
 			{
-				
+				vtkIdType pid1 = relationships[r][0];
+				vtkIdType pid2 = relationships[r][1];
+
+				double coord1[3], coord2[3];
+				SamplePoly->GetPoint(pid1, coord1);
+				SamplePoly->GetPoint(pid2, coord2);
+
+				double dir[3];
+				vtkMath::Subtract(coord1, coord2, dir);
+				double dis = vtkMath::Norm(dir);
+				vtkMath::Normalize(dir);
+
+				double zerodistance = parameters[r][0];
+				double forcescale = parameters[r][1];
+
+				double reletivedis = (dis + 1e-7) / (zerodistance + 1e-7);
+				double thisforcenorm = -log(reletivedis);
+
+				double thisforce[3];
+				for (int l = 0; l < 3; l++)
+					thisforce[l] = thisforcenorm * dir[l];
+
+				for (int l = 0; l < 3; l++)
+				{
+					forces[pid1][l] = forces[pid1][l] + thisforce[l];
+					forces[pid2][l] = forces[pid2][l] - thisforce[l];
+				}
+			}
+
+			// add boundary force
+			// combine Fi_cl and Fi_p
+			//for (int l = 0; l < 3; l++) Fi[l] = 100.0 * Fi_c[l] + 1.0 * Fi_p[l];
+			
+			for (int i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i ++)
+			{
+				// move points according to forces
+				double Fi[3];
+				for (int l = 0; l < 3; l++) Fi[l] = forces[i][l];
+
+				if (vtkMath::Norm(Fi) > 10.0)
+				{
+					vtkMath::Normalize(Fi);
+					for (int l = 0; l < 3; l++) Fi[l] = 10.0 * Fi[l];
+				}
+
+				double coordi[3];
+				SamplePoly->GetPoint(i, coordi);
+				for (int l = 0; l < 3; l++) coordi[l] = coordi[l] + Fi[l] / POINTMASS * TIMESTEP;
+				//coordi_new[2] = 0.0; 
+				SamplePoly->GetPoints()->SetPoint(i, coordi);
+			}
+
+			for (int i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
+			{
+
 
 
 			}
 
+
+			SamplePoly->Modified();
+			renderWindow->Render();
 		}		
 	}
 
