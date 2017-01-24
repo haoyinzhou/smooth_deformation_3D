@@ -58,9 +58,457 @@ public:
 
 	MouseInteractorStyle() 
 	{
+		SamplePoly = vtkSmartPointer<vtkPolyData>::New();
+
+		isControlPoint = vtkSmartPointer<vtkIdTypeArray>::New();
+
+		ControlPointCoord = vtkSmartPointer<vtkDoubleArray>::New();
 	}
-	~MouseInteractorStyle()
+
+	~MouseInteractorStyle(){	}
+
+	bool InitialPointcloud()
 	{
+		if (BoundaryPolynormalGenerator == NULL)
+		{
+			std::cerr << "cannot find BoundaryPolynormalGenerator" << std::endl;
+			return false;
+		}
+		vtkFloatArray* BoundaryNormalArray = vtkFloatArray::SafeDownCast(BoundaryPolynormalGenerator->GetOutput()->GetPointData()->GetArray("Normals"));
+		if (BoundaryNormalArray == NULL)
+		{
+			std::cerr << "cannot find BoundaryNormalArray" << std::endl;
+			return false;
+		}
+
+		connectionCellArray->Reset();
+		relationships.clear();
+		parameters.clear();
+
+		vtkSmartPointer<vtkPoints> SamplePoints = SamplePoly->GetPoints();
+		for (int i = 0; i < SamplePoints->GetNumberOfPoints();)
+		{
+			double coordi[3] = { 0.0, 0.0, 0.0 };
+			coordi[0] = vtkMath::Random(-CRADIUS, CRADIUS);
+			coordi[1] = vtkMath::Random(-CRADIUS, CRADIUS);
+			coordi[2] = vtkMath::Random(-CRADIUS, CRADIUS);
+
+			vtkIdType nearestboundaryPID = boundarypointLocator->FindClosestPoint(coordi);
+			double boundarycoord[3];
+			BoundaryPoly->GetPoint(nearestboundaryPID, boundarycoord);
+			double dir_p2boundary[3];
+			vtkMath::Subtract(boundarycoord, coordi, dir_p2boundary);
+			vtkMath::Normalize(dir_p2boundary);
+			double boundarynormal[3];
+			BoundaryNormalArray->GetTuple(nearestboundaryPID, boundarynormal);
+			if (vtkMath::Dot(dir_p2boundary, boundarynormal) < 0)
+				continue;
+			SamplePoints->SetPoint(i, coordi);
+			i ++;
+		}
+
+		for (int i = 0; i < R->GetNumberOfTuples(); i ++)
+		{
+			R->SetValue(i, R_INITIAL);
+		}
+
+		return true;
+	}
+
+	bool UniformRedistribution()
+	{
+		if (BoundaryPolynormalGenerator == NULL)
+		{
+			std::cerr << "cannot find BoundaryPolynormalGenerator" << std::endl;
+			return false;
+		}
+		vtkFloatArray* BoundaryNormalArray = vtkFloatArray::SafeDownCast(BoundaryPolynormalGenerator->GetOutput()->GetPointData()->GetArray("Normals"));
+		if (BoundaryNormalArray == NULL)
+		{
+			std::cerr << "cannot find BoundaryNormalArray" << std::endl;
+			return false;
+		}
+
+		for (int iter = 0; iter < 200; iter ++)
+		{
+			for (vtkIdType i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i ++)
+			{
+				double coordi[3];
+				SamplePoly->GetPoints()->GetPoint(i, coordi);
+				double Ri = R->GetValue(i);
+				
+				double Fi[3] = { 0.0, 0.0, 0.0 };
+				double Fi_c[3] = { 0.0, 0.0, 0.0 };
+				double Fi_p[3] = { 0.0, 0.0, 0.0 };
+
+				// force between center and this point
+				{
+					vtkIdType nearestboundaryPID = boundarypointLocator->FindClosestPoint(coordi);
+					double boundarycoord[3];
+					BoundaryPoly->GetPoint(nearestboundaryPID, boundarycoord);
+					double dir_p2boundary[3];
+					vtkMath::Subtract(boundarycoord, coordi, dir_p2boundary);
+					vtkMath::Normalize(dir_p2boundary);
+					double boundarynormal[3];
+					BoundaryNormalArray->GetTuple(nearestboundaryPID, boundarynormal);
+
+					double F_mode_c = 0.0;
+					if (vtkMath::Dot(dir_p2boundary, boundarynormal) > 0)
+						F_mode_c = 0.0;
+					else
+						F_mode_c = -1000.0;
+
+					for (int l = 0; l < 3; l++) Fi_c[l] += F_mode_c * boundarynormal[l];
+				}
+
+				// force between points
+				double Fpi_abssum = 0.0;
+				double Fpi_sumabs = 0.0;
+				vtkSmartPointer<vtkIdList> NeighorpIds = vtkSmartPointer<vtkIdList>::New();
+				//pointLocator->FindPointsWithinRadius(4.0, coordi, NeighorpIds);
+				pointLocator->FindClosestNPoints(20, coordi, NeighorpIds);
+
+				for (int idxj = 0; idxj < NeighorpIds->GetNumberOfIds(); idxj++)
+				{
+					vtkIdType j = NeighorpIds->GetId(idxj);
+					if (i == j) continue;
+
+					double coordj[3];
+					SamplePoly->GetPoint(j, coordj);
+
+					double dir[3];
+					vtkMath::Subtract(coordi, coordj, dir);
+					double dis = vtkMath::Norm(dir);
+					vtkMath::Normalize(dir);
+
+					double Rj = R->GetValue(j);
+					double R_total = Ri + Rj;
+
+					if (dis < 0.55 * R_total)
+					{
+						double temp = 0.5 / R_total * dis + 0.5;
+						double Fij_p_mode = (1.0 / (temp*temp*temp*temp*temp*temp) - 1.0 / (temp));
+						double Fij_p[3] = { 0.0, 0.0, 0.0 };
+						for (int l = 0; l < 3; l++) Fij_p[l] = Fij_p_mode * dir[l];
+						for (int l = 0; l < 3; l++) Fi_p[l] += Fij_p[l];
+						Fpi_sumabs += vtkMath::Norm(Fij_p);
+					}
+				}
+
+				Fpi_abssum = vtkMath::Norm(Fi_p);
+
+				// combine Fi_cl and Fi_p
+				for (int l = 0; l < 3; l++) Fi[l] = Fi_c[l] + 1.0 * Fi_p[l];
+
+				// move points based on force
+				if (vtkMath::Norm(Fi) > 10.0)
+				{
+					vtkMath::Normalize(Fi);
+					for (int l = 0; l < 3; l++) Fi[l] = 10.0 * Fi[l];
+				}
+				
+				double coordi_new[3];
+				for (int l = 0; l < 3; l++) coordi_new[l] = coordi[l] + Fi[l] / POINTMASS * TIMESTEP;
+				//coordi_new[2] = 0.0; 
+
+				SamplePoly->GetPoints()->SetPoint(i, coordi_new);
+				F_abssum->SetValue(i, Fpi_abssum);
+				F_sumabs->SetValue(i, Fpi_sumabs);
+			}
+
+			// update radius Ri
+			//double meanR = CRADIUS * CRADIUS / SamplePoints->GetNumberOfPoints();
+			for (int i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
+			{
+				double Ri = R->GetValue(i);
+				double delta_Ri_Max = 1.0 * TIMESTEP;
+
+				double delta_Ri = delta_Ri_Max;
+				double CondenseForce = F_sumabs->GetValue(i) - F_abssum->GetValue(i) - 5.5 * BorderForce; // 6 means hexagon grid mesh
+				//	delta_Ri = (delta_Ri_Max + 1.0 - 0.1 * exp(CondenseForce / Hardness)) * timestep;	
+				double temp = 1.0 + 0.003 * CondenseForce;
+				if (temp <= 0.05)
+					delta_Ri = delta_Ri_Max;
+				else
+					delta_Ri = -log(temp) * TIMESTEP;
+				if (delta_Ri > delta_Ri_Max)
+					delta_Ri = delta_Ri_Max;
+
+				Ri += delta_Ri;
+				Ri = Ri < 0.05 ? 0.05 : Ri;
+				Ri = Ri > 1.0? 1.0 : Ri;
+
+				R->SetValue(i, Ri);
+			}
+		}
+
+		return true;
+	}
+
+	bool BuildRelationships()
+	{
+		vector< vector<vtkIdType> > connections(SamplePoly->GetPoints()->GetNumberOfPoints());
+
+		// draw the connections
+		connectionCellArray->Reset();
+		relationships.clear();
+
+		for (vtkIdType i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
+		{
+			double coordi[3];
+			SamplePoly->GetPoints()->GetPoint(i, coordi);
+			double Ri = R->GetValue(i);
+
+			vtkSmartPointer<vtkIdList> NeighorpIds = vtkSmartPointer<vtkIdList>::New();
+			//pointLocator->FindPointsWithinRadius(4.0, coordi, NeighorpIds);
+			pointLocator->FindClosestNPoints(20, coordi, NeighorpIds);
+
+			for (int idxj = 0; idxj < NeighorpIds->GetNumberOfIds(); idxj++)
+			{
+				vtkIdType j = NeighorpIds->GetId(idxj);
+				if (i == j) continue;
+
+				double coordj[3];
+				SamplePoly->GetPoints()->GetPoint(j, coordj);
+
+				double dir[3];
+				vtkMath::Subtract(coordi, coordj, dir);
+				double dis = vtkMath::Norm(dir);
+
+				double Rj = R->GetValue(j);
+				double R_total = Ri + Rj;
+
+				if (dis < 0.60 * R_total)
+					connections[i].push_back(j);
+			}
+		}
+		// refine connections
+		for (vtkIdType i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
+			for (int idj = 0; idj < connections[i].size(); idj++)
+		{
+			vtkIdType j = connections[i].at(idj);
+			bool flag_iinjfile = false;
+			for (int idk = 0; idk < connections[j].size(); idk++)
+			{
+				if (i == connections[j].at(idk))
+				{
+					flag_iinjfile = true;
+					break;
+				}
+			}
+			if (flag_iinjfile == false)
+				connections[j].push_back(i);
+		}
+
+		// build relationships
+		for (vtkIdType i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
+			for (int idj = 0; idj < connections[i].size(); idj++)
+		{
+			vtkIdType j = connections[i].at(idj);
+			if (j <= i)	continue;
+			vtkSmartPointer<vtkLine> line = vtkSmartPointer<vtkLine>::New();
+			line->GetPointIds()->SetId(0, i);
+			line->GetPointIds()->SetId(1, j);
+			connectionCellArray->InsertNextCell(line);
+
+			vector<vtkIdType> thisconnection;
+			thisconnection.push_back(i);
+			thisconnection.push_back(j);
+			relationships.push_back(thisconnection);
+		}
+		
+		return true;
+	}
+
+	bool BuildRelationshipsParameters()
+	{
+		if (relationships.size() == 0)
+			return false;
+
+		parameters.clear();
+
+		for (int r = 0; r < relationships.size(); r ++)
+		{
+			double coord1[3], coord2[3];
+			SamplePoly->GetPoint(relationships[r][0], coord1);
+			SamplePoly->GetPoint(relationships[r][1], coord2);
+
+			vector<double> thisparam;
+			double dis = sqrt(vtkMath::Distance2BetweenPoints(coord1, coord2));
+			thisparam.push_back(dis);
+			double forcescale = 1.0; // should be different for different parts
+			thisparam.push_back(forcescale);
+
+			parameters.push_back(thisparam);
+		}
+
+		return true;
+	}
+
+	bool FindSurfaceControlPoints()
+	{
+		RelatedBoundaryPids.clear();
+
+		for (vtkIdType i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
+		{
+			double coordi[3];
+			SamplePoly->GetPoint(i, coordi);
+
+			vtkIdType nearestboundaryPID = boundarypointLocator->FindClosestPoint(coordi);
+			double boundarycoord[3];
+			BoundaryPoly->GetPoint(nearestboundaryPID, boundarycoord);
+			double dir_p2boundary[3];
+			vtkMath::Subtract(boundarycoord, coordi, dir_p2boundary);
+			double dis_p2boundary = vtkMath::Norm(dir_p2boundary);
+
+			if (dis_p2boundary < 5e-1)
+			{
+				isControlPoint->SetValue(i, 1);
+				ControlPointCoord->SetTuple(i, boundarycoord);
+				RelatedBoundaryPids.push_back(nearestboundaryPID);
+			}
+			else
+			{
+				double tempcoord[3] = { 0.0, 0.0, 0.0 };
+				isControlPoint->SetValue(i, 0);
+				ControlPointCoord->SetTuple(i, tempcoord);
+				RelatedBoundaryPids.push_back(-1);
+			}
+		}
+
+		return true;
+	}
+
+	bool DeformationMotion()
+	{
+		if (relationships.size() == 0)
+			return false;
+		if (relationships.size() != parameters.size())
+			return false;
+		if (isControlPoint == NULL)
+			return false;
+
+		if (BoundaryPolynormalGenerator == NULL)
+		{
+			std::cerr << "cannot find BoundaryPolynormalGenerator" << std::endl;
+			return false;
+		}
+		vtkFloatArray* BoundaryNormalArray = vtkFloatArray::SafeDownCast(BoundaryPolynormalGenerator->GetOutput()->GetPointData()->GetArray("Normals"));
+		if (BoundaryNormalArray == NULL)
+		{
+			std::cerr << "cannot find BoundaryNormalArray" << std::endl;
+			return false;
+		}
+
+
+		{
+			forces.clear();
+			for (int i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
+			{
+				vector<double> forcei;
+				for (int l = 0; l < 3; l++) forcei.push_back(0.0);
+				forces.push_back(forcei);
+			}
+
+			for (int r = 0; r < relationships.size(); r++)
+			{
+				vtkIdType pid1 = relationships[r][0];
+				vtkIdType pid2 = relationships[r][1];
+
+				double coord1[3], coord2[3];
+				SamplePoly->GetPoint(pid1, coord1);
+				SamplePoly->GetPoint(pid2, coord2);
+
+				double dir[3];
+				vtkMath::Subtract(coord1, coord2, dir);
+				double dis = vtkMath::Norm(dir);
+				vtkMath::Normalize(dir);
+
+				double zerodistance = parameters[r][0];
+				//	zerodistance = 0.5 * zerodistance;
+				double forcescale = parameters[r][1];
+
+				double reletivedis = (dis + 1e-7) / (zerodistance + 1e-7);
+				//	double thisforcenorm = -log(reletivedis);
+				double thisforcenorm = -20.0 * forcescale * (reletivedis - 1.0);
+				thisforcenorm = thisforcenorm > 30.0 ? 30.0 : thisforcenorm;
+				thisforcenorm = thisforcenorm < -30.0 ? -30.0 : thisforcenorm;
+
+				double thisforce[3];
+				for (int l = 0; l < 3; l++)
+					thisforce[l] = thisforcenorm * dir[l];
+
+				for (int l = 0; l < 3; l++)
+				{
+					forces[pid1][l] = forces[pid1][l] + thisforce[l];
+					forces[pid2][l] = forces[pid2][l] - thisforce[l];
+				}
+			}
+
+			//// add boundary force
+			//for (int i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
+			//{
+			//	if (isControlPoint->GetValue(i) == 1)
+			//		continue;
+			//	double coordi[3];
+			//	SamplePoly->GetPoint(i, coordi);
+			//	vtkIdType nearestboundaryPID = boundarypointLocator->FindClosestPoint(coordi);
+			//	double boundarycoord[3];
+			//	BoundaryPoly->GetPoint(nearestboundaryPID, boundarycoord);
+			//	double dir_p2boundary[3];
+			//	vtkMath::Subtract(boundarycoord, coordi, dir_p2boundary);
+			//	double dis_p2boundary = vtkMath::Norm(dir_p2boundary);
+			//	vtkMath::Normalize(dir_p2boundary);
+			//
+			//	double boundarynormal[3];
+			//	BoundaryNormalArray->GetTuple(nearestboundaryPID, boundarynormal);
+			//
+			//	double thisboundaryforce_norm = 0.0;
+			//	if (vtkMath::Dot(dir_p2boundary, boundarynormal) > 0)
+			//		thisboundaryforce_norm = 0.0;
+			//	else
+			//		thisboundaryforce_norm = 100.0;
+			//
+			//	for (int l = 0; l < 3; l++)
+			//	{
+			//		forces[i][l] = forces[i][l] + thisboundaryforce_norm * dir_p2boundary[l];
+			//	}
+			//}
+
+			for (int i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
+			{
+				// move points according to forces
+				if (isControlPoint->GetValue(i) == 1)
+				{
+					double coordi[3];
+					ControlPointCoord->GetTuple(i, coordi);
+					SamplePoly->GetPoints()->SetPoint(i, coordi);
+				}
+				else
+				{
+					double Fi[3];
+					for (int l = 0; l < 3; l++) Fi[l] = forces[i][l];
+
+					if (vtkMath::Norm(Fi) > 50.0)
+					{
+						vtkMath::Normalize(Fi);
+						for (int l = 0; l < 3; l++) Fi[l] = 50.0 * Fi[l];
+					}
+
+					double coordi[3];
+					SamplePoly->GetPoint(i, coordi);
+					for (int l = 0; l < 3; l++) coordi[l] = coordi[l] + Fi[l] / POINTMASS * TIMESTEP;
+					SamplePoly->GetPoints()->SetPoint(i, coordi);
+				}
+			}
+
+			//connectionCellArray->Modified();
+			//connectionPolyData->Modified();
+			//SamplePoly->Modified();
+			//renderWindow->Render();
+		}
+	
+		return true;
 	}
 
 	virtual void OnRightButtonDown()
@@ -68,6 +516,8 @@ public:
 		ClickCount++;
 
 	//	SavePolyData(BoundaryPoly, "C:\\work\\smooth_deformation_3D\\testdata\\BoundaryPoly.vtp");
+		vector< vector<vtkIdType> > connections(SamplePoly->GetPoints()->GetNumberOfPoints());
+
 		vtkFloatArray* BoundaryNormalArray = vtkFloatArray::SafeDownCast(BoundaryPoly->GetPointData()->GetArray("Normals"));
 		if (BoundaryNormalArray == NULL)
 		{
@@ -75,15 +525,10 @@ public:
 			return;
 		}
 
-		//vtkSmartPointer<vtkPoints> SamplePoints = SamplePoly->GetPoints();
-
-		vector< vector<vtkIdType> > connections(SamplePoly->GetPoints()->GetNumberOfPoints());
-
-		for (int iter = 0; iter < 10; iter ++)
+		for (int iter = 0; iter < 200; iter++)
 		{
 			for (vtkIdType i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
 			{
-				if (pointflag->GetValue(i) == 0) continue;
 				double coordi[3];
 				SamplePoly->GetPoints()->GetPoint(i, coordi);
 				double Ri = R->GetValue(i);
@@ -111,9 +556,9 @@ public:
 					if (vtkMath::Dot(dir_p2boundary, boundarynormal) > 0)
 						F_mode_c = 0.0;
 					else
-						F_mode_c = -10.0;
+						F_mode_c = -1000.0;
 
-					for (int l = 0; l < 3; l++) Fi_c[l] += F_mode_c * diri[l];
+					for (int l = 0; l < 3; l++) Fi_c[l] += F_mode_c * boundarynormal[l];
 				}
 
 				// force between points
@@ -155,7 +600,7 @@ public:
 				Fpi_abssum = vtkMath::Norm(Fi_p);
 
 				// combine Fi_cl and Fi_p
-				for (int l = 0; l < 3; l++) Fi[l] = 100.0 * Fi_c[l] + 1.0 * Fi_p[l];
+				for (int l = 0; l < 3; l++) Fi[l] = Fi_c[l] + 1.0 * Fi_p[l];
 
 				// move points based on force
 				if (vtkMath::Norm(Fi) > 10.0)
@@ -176,9 +621,6 @@ public:
 			//double meanR = CRADIUS * CRADIUS / SamplePoints->GetNumberOfPoints();
 			for (int i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
 			{
-				if (pointflag->GetValue(i) == 0)
-					continue;
-
 				double Ri = R->GetValue(i);
 				double delta_Ri_Max = 1.0 * TIMESTEP;
 
@@ -199,7 +641,7 @@ public:
 
 				R->SetValue(i, Ri);
 			}
-
+		}
 			// draw the connections
 			if (ClickCount > 0.0)
 			{
@@ -208,7 +650,6 @@ public:
 
 				for (vtkIdType i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
 				{
-					if (pointflag->GetValue(i) == 0) continue;
 					double coordi[3];
 					SamplePoly->GetPoints()->GetPoint(i, coordi);
 					double Ri = R->GetValue(i);
@@ -256,27 +697,27 @@ public:
 
 				for (vtkIdType i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
 					for (int idj = 0; idj < connections[i].size(); idj++)
-					{
-						vtkIdType j = connections[i].at(idj);
-						if (j <= i)	continue;
-						vtkSmartPointer<vtkLine> line = vtkSmartPointer<vtkLine>::New();
-						line->GetPointIds()->SetId(0, i);
-						line->GetPointIds()->SetId(1, j);
-						connectionCellArray->InsertNextCell(line);
+				{
+					vtkIdType j = connections[i].at(idj);
+					if (j <= i)	continue;
+					vtkSmartPointer<vtkLine> line = vtkSmartPointer<vtkLine>::New();
+					line->GetPointIds()->SetId(0, i);
+					line->GetPointIds()->SetId(1, j);
+					connectionCellArray->InsertNextCell(line);
 
-						vector<vtkIdType> thisconnection;
-						thisconnection.push_back(i);
-						thisconnection.push_back(j);
-						relationships.push_back(thisconnection);
-					}
+					vector<vtkIdType> thisconnection;
+					thisconnection.push_back(i);
+					thisconnection.push_back(j);
+					relationships.push_back(thisconnection);
+				}
 
 				connectionCellArray->Modified();
 				connectionPolyData->Modified();
 			}
 
-			SamplePoly->Modified();
-			renderWindow->Render();
-		}
+
+		SamplePoly->Modified();
+		renderWindow->Render();
 
 		std::cout << "connectionCellArray = " << connectionCellArray->GetNumberOfCells() << ", relationships = " << relationships.size() << std::endl;
 		std::cout << ClickCount << " calculation is done" << std::endl;
@@ -286,176 +727,35 @@ public:
 	{
 		std::string key = this->Interactor->GetKeySym();
 		
-		if (key == "s") // start to uniformly sampling
+		if (key == "a")
 		{
-
-
-		}
-		else if (key == "d")
-		{
-			parameters.clear();
-
-			for (int r = 0; r < relationships.size(); r ++)
-			{
-				double coord1[3], coord2[3];
-				SamplePoly->GetPoint(relationships[r][0], coord1);
-				SamplePoly->GetPoint(relationships[r][1], coord2);
-				
-				vector<double> thisparam;
-				double dis = sqrt(vtkMath::Distance2BetweenPoints(coord1, coord2));
-				thisparam.push_back(dis);
-				double forcescale = 1.0; // should be different for different parts
-				thisparam.push_back(forcescale);
-
-				parameters.push_back(thisparam);
-			}
-			
-			if (SamplePoly->GetPointData()->HasArray("isControlPoint"))
-				SamplePoly->GetPointData()->RemoveArray("isControlPoint");
-
-			isControlPoint = vtkSmartPointer<vtkIdTypeArray>::New();
-			isControlPoint->SetName("isControlPoint");
-			isControlPoint->SetNumberOfComponents(1);
-			ControlPointCoord = vtkSmartPointer<vtkDoubleArray>::New();
-			ControlPointCoord->SetName("ControlPointCoord");
-			ControlPointCoord->SetNumberOfComponents(3);
-			RelatedBoundaryPids.clear();
-
-			for (vtkIdType i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
-			{
-				if (pointflag->GetValue(i) == 0) continue;
-				double coordi[3];
-				SamplePoly->GetPoint(i, coordi);
-
-				vtkIdType nearestboundaryPID = boundarypointLocator->FindClosestPoint(coordi);
-				double boundarycoord[3];
-				BoundaryPoly->GetPoint(nearestboundaryPID, boundarycoord);
-				double dir_p2boundary[3];
-				vtkMath::Subtract(boundarycoord, coordi, dir_p2boundary);
-				double dis_p2boundary = vtkMath::Norm(dir_p2boundary);
-
-				if (dis_p2boundary < 5e-1)
-				{
-					isControlPoint->InsertNextValue(1);
-					ControlPointCoord->InsertNextTuple(boundarycoord);
-					RelatedBoundaryPids.push_back(nearestboundaryPID);
-				}
-				else
-				{
-					double tempcoord[3] = { 0.0, 0.0, 0.0 };
-					isControlPoint->InsertNextValue(0);
-					ControlPointCoord->InsertNextTuple(tempcoord);
-					RelatedBoundaryPids.push_back(-1);
-				}
-			}
-			SamplePoly->GetPointData()->AddArray(isControlPoint);
-			std::cout << "isControlPoint.num = " << isControlPoint->GetNumberOfTuples() << std::endl;
-		//	SavePolyData(SamplePoly, "C:\\work\\smooth_deformation_3D\\testdata\\SamplePoly.vtp");
-
-		}
-		else if (key == "g")
-		{
-			if (relationships.size() == 0)
+			if (InitialPointcloud() == false)
 				return;
-			if (relationships.size() != parameters.size())
-				return;
-			if (isControlPoint == NULL)
-				return;
-
-			forces.clear();
-			for (int i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i ++)
-			{
-				vector<double> forcei;
-				for (int l = 0; l < 3; l++) forcei.push_back(0.0);
-				forces.push_back(forcei);
-			}
-			
-			for (int r = 0; r < relationships.size(); r++)
-			{
-				vtkIdType pid1 = relationships[r][0];
-				vtkIdType pid2 = relationships[r][1];
-
-				double coord1[3], coord2[3];
-				SamplePoly->GetPoint(pid1, coord1);
-				SamplePoly->GetPoint(pid2, coord2);
-
-				double dir[3];
-				vtkMath::Subtract(coord1, coord2, dir);
-				double dis = vtkMath::Norm(dir);
-				vtkMath::Normalize(dir);
-
-				double zerodistance = parameters[r][0];
-			//	zerodistance = 0.5 * zerodistance;
-				double forcescale = parameters[r][1];
-
-				double reletivedis = (dis + 1e-7) / (zerodistance + 1e-7);
-				double thisforcenorm = -log(reletivedis);
-
-				double thisforce[3];
-				for (int l = 0; l < 3; l++)
-					thisforce[l] = thisforcenorm * dir[l];
-
-				for (int l = 0; l < 3; l++)
-				{
-					forces[pid1][l] = forces[pid1][l] + thisforce[l];
-					forces[pid2][l] = forces[pid2][l] - thisforce[l];
-				}
-			}
-
-			// add boundary force
-			//for (int i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
-			//{
-			//	if (isBoundaryPoint->GetValue(i) == 0)
-			//		continue;
-			//	double coordi[3];
-			//	SamplePoly->GetPoint(i, coordi);
-			//	vtkIdType nearestboundaryPID = boundarypointLocator->FindClosestPoint(coordi);
-			//	double boundarycoord[3];
-			//	BoundaryPoly->GetPoint(nearestboundaryPID, boundarycoord);
-			//	double dir_p2boundary[3];
-			//	vtkMath::Subtract(boundarycoord, coordi, dir_p2boundary);
-			//	double dis_p2boundary = vtkMath::Norm(dir_p2boundary);
-			//	vtkMath::Normalize(dir_p2boundary);
-			//	double thisboundaryforce_norm = 1000.0 * dis_p2boundary;
-			//	for (int l = 0; l < 3; l++)
-			//	{
-			//		forces[i][l] = forces[i][l] + thisboundaryforce_norm * dir_p2boundary[l];
-			//	}
-			//}
-	
-			for (int i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i ++)
-			{
-				// move points according to forces
-				if (isControlPoint->GetValue(i) == 1)
-				{
-					double coordi[3];
-					ControlPointCoord->GetTuple(i, coordi);
-					SamplePoly->GetPoints()->SetPoint(i, coordi);
-				}
-				else
-				{
-					double Fi[3];
-					for (int l = 0; l < 3; l++) Fi[l] = forces[i][l];
-
-					if (vtkMath::Norm(Fi) > 50.0)
-					{
-						vtkMath::Normalize(Fi);
-						for (int l = 0; l < 3; l++) Fi[l] = 50.0 * Fi[l];
-					}
-
-					double coordi[3];
-					SamplePoly->GetPoint(i, coordi);
-					for (int l = 0; l < 3; l++) coordi[l] = coordi[l] + Fi[l] / POINTMASS * TIMESTEP;
-					SamplePoly->GetPoints()->SetPoint(i, coordi);
-				}
-			}
-
 			connectionCellArray->Modified();
 			connectionPolyData->Modified();
 			SamplePoly->Modified();
 			renderWindow->Render();
-		}	
+		}
 
+		if (key == "s") // start to uniformly sampling
+		{
+		//	if (InitialPointcloud() == false)
+		//		return;
+
+			if (UniformRedistribution() == true)
+			{
+				BuildRelationships();
+				BuildRelationshipsParameters();
+				FindSurfaceControlPoints();
+
+				connectionCellArray->Modified();
+				connectionPolyData->Modified();
+				SamplePoly->Modified();
+				renderWindow->Render();
+
+			//	SavePolyData(SamplePoly, "C:\\work\\smooth_deformation_3D\\testdata\\SamplePoly.vtp");
+			}
+		}
 		else if (key == "Left")
 		{
 			if (ControlPointCoord == NULL)
@@ -473,11 +773,13 @@ public:
 			BoundaryPoly->Modified();
 			renderWindow->Render();
 
+			BoundaryPolynormalGenerator->Update();
+
 			for (int i = 0; i < ControlPointCoord->GetNumberOfTuples(); i++)
 			{
-				if (isControlPoint->GetValue(i) == 0)
+				if (isControlPoint->GetValue(i) != 1)
 					continue;
-				
+
 				double newcontrolcoord[3];
 				BoundaryPoly->GetPoint(RelatedBoundaryPids[i], newcontrolcoord);
 				ControlPointCoord->SetTuple(i, newcontrolcoord);
@@ -500,9 +802,11 @@ public:
 			BoundaryPoly->Modified();
 			renderWindow->Render();
 
+			BoundaryPolynormalGenerator->Update();
+
 			for (int i = 0; i < ControlPointCoord->GetNumberOfTuples(); i++)
 			{
-				if (isControlPoint->GetValue(i) == 0)
+				if (isControlPoint->GetValue(i) != 1)
 					continue;
 
 				double newcontrolcoord[3];
@@ -510,6 +814,18 @@ public:
 				ControlPointCoord->SetTuple(i, newcontrolcoord);
 			}
 		}
+		else if (key == "g")
+		{
+			for (int iter = 0; iter < 100; iter ++)
+			{
+				DeformationMotion();
+				connectionCellArray->Modified();
+				connectionPolyData->Modified();
+				SamplePoly->Modified();
+				renderWindow->Render();
+			}
+		//	BuildRelationshipsParameters();
+		}	
 
 	}
 
@@ -523,12 +839,11 @@ public:
 	// boundary
 	vtkPolyData* BoundaryPoly;
 	vtkPointLocator* boundarypointLocator;	
-	
+	vtkSmartPointer<vtkPolyDataNormals> BoundaryPolynormalGenerator;
+
 	// p
 	vtkPointLocator* pointLocator;
 	vtkSmartPointer<vtkPolyData> SamplePoly;
-	vtkCellArray* SampleCell;
-	vtkIntArray* pointflag;
 	vtkDoubleArray* R;	// radius
 	vtkDoubleArray* F_sumabs;	// force with respect to other points
 	vtkDoubleArray* F_abssum;	// force with respect to other points
@@ -540,8 +855,7 @@ public:
 	vector< vector<vtkIdType> > relationships; // each one has two points ids.
 	vector< vector<double> > parameters; // each one has some parameters for calculating forces
 	vector< vector<double> > forces;		// forces used in phrase 2
-
-
+	
 	vtkPolyData* connectionPolyData;
 	vtkCellArray* connectionCellArray;
 };
@@ -565,19 +879,56 @@ int main(int argc, char *argv[])
 	BoundaryPolynormalGenerator->ConsistencyOn();
 	BoundaryPolynormalGenerator->AutoOrientNormalsOn();
 	BoundaryPolynormalGenerator->Update();
+	vtkFloatArray* BoundaryNormalArray = vtkFloatArray::SafeDownCast(BoundaryPolynormalGenerator->GetOutput()->GetPointData()->GetArray("Normals"));
+	if (BoundaryNormalArray == NULL)
+	{
+		std::cerr << "cannot find BoundaryNormalArray" << std::endl;
+		return false;
+	}
 
+
+	vtkSmartPointer<vtkPointLocator> boundarypointLocator = vtkSmartPointer<vtkPointLocator>::New();
+	boundarypointLocator->SetDataSet(BoundaryPoly);
+	boundarypointLocator->AutomaticOn();
+	boundarypointLocator->SetNumberOfPointsPerBucket(1);
+	boundarypointLocator->BuildLocator();
 	
 	// generate initial SamplePoints
 	vtkSmartPointer<vtkPoints> SamplePoints = vtkSmartPointer<vtkPoints>::New();
+
+	vtkSmartPointer<vtkIdTypeArray> isControlPoint = vtkSmartPointer<vtkIdTypeArray>::New();
+	isControlPoint->SetName("isControlPoint");
+	isControlPoint->SetNumberOfComponents(1);
+	isControlPoint->SetNumberOfValues(SamplePoints->GetNumberOfPoints());
+	vtkSmartPointer<vtkDoubleArray> ControlPointCoord = vtkSmartPointer<vtkDoubleArray>::New();
+	ControlPointCoord->SetName("ControlPointCoord");
+	ControlPointCoord->SetNumberOfComponents(3);
+	ControlPointCoord->SetNumberOfTuples(SamplePoints->GetNumberOfPoints());
+
 	for (int i = 0; i < N; )
 	{
 		double coordi[3] = {0.0, 0.0, 0.0};
 		coordi[0] = vtkMath::Random(-CRADIUS, CRADIUS);
 		coordi[1] = vtkMath::Random(-CRADIUS, CRADIUS);
 		coordi[2] = vtkMath::Random(-CRADIUS, CRADIUS);
-		if (vtkMath::Norm(coordi) > CRADIUS) continue;
-		i ++;
+		//	if (vtkMath::Norm(coordi) > CRADIUS) continue;
+		
+		vtkIdType nearestboundaryPID = boundarypointLocator->FindClosestPoint(coordi);
+		double boundarycoord[3];
+		BoundaryPoly->GetPoint(nearestboundaryPID, boundarycoord);
+		double dir_p2boundary[3];
+		vtkMath::Subtract(boundarycoord, coordi, dir_p2boundary);
+		vtkMath::Normalize(dir_p2boundary);
+		double boundarynormal[3];
+		BoundaryNormalArray->GetTuple(nearestboundaryPID, boundarynormal);
+		if (vtkMath::Dot(dir_p2boundary, boundarynormal) < 0)
+			continue;	
+
 		SamplePoints->InsertNextPoint(coordi);
+		isControlPoint->InsertNextValue(0);
+		double temp[3] = { 0.0, 0.0, 0.0 };
+		ControlPointCoord->InsertNextTuple(temp);
+		i ++;
 	}
 
 	vtkSmartPointer<vtkCellArray> SampleCell = vtkSmartPointer<vtkCellArray>::New();
@@ -596,16 +947,7 @@ int main(int argc, char *argv[])
 	pointLocator->SetNumberOfPointsPerBucket(1);
 	pointLocator->BuildLocator();
 
-	vtkSmartPointer<vtkPointLocator> boundarypointLocator = vtkSmartPointer<vtkPointLocator>::New();
-	boundarypointLocator->SetDataSet(BoundaryPoly);
-	boundarypointLocator->AutomaticOn();
-	boundarypointLocator->SetNumberOfPointsPerBucket(1);
-	boundarypointLocator->BuildLocator();
-
-
-	vtkSmartPointer<vtkIntArray> pointflag = vtkSmartPointer<vtkIntArray>::New();
-	pointflag->SetName("pointflag");
-	pointflag->SetNumberOfComponents(1);
+	
 	vtkSmartPointer<vtkDoubleArray> R = vtkSmartPointer<vtkDoubleArray>::New(); // radius
 	R->SetName("radius");
 	R->SetNumberOfComponents(1);
@@ -618,7 +960,6 @@ int main(int argc, char *argv[])
 
 	for (int i = 0; i < SamplePoints->GetNumberOfPoints(); i ++)
 	{
-		pointflag->InsertNextValue(1);
 		R->InsertNextValue(R_INITIAL);	// R is initialized with a small number
 		F_abssum->InsertNextValue(0.0);
 		F_sumabs->InsertNextValue(0.0);
@@ -627,7 +968,6 @@ int main(int argc, char *argv[])
 	SamplePoly->GetPointData()->AddArray(R);
 	SamplePoly->GetPointData()->AddArray(F_abssum);
 	SamplePoly->GetPointData()->AddArray(F_sumabs);
-	SamplePoly->GetPointData()->AddArray(pointflag);
 
 	std::cout << "SamplePoints.num = " << SamplePoints->GetNumberOfPoints() << std::endl;
 
@@ -636,8 +976,7 @@ int main(int argc, char *argv[])
 	vtkSmartPointer<vtkPolyData> connectionPolyData = vtkSmartPointer<vtkPolyData>::New();
 	connectionPolyData->SetPoints(SamplePoints);
 	connectionPolyData->SetLines(connectionCellArray);
-	
-	
+		
 	// Render window
 	vtkSmartPointer<vtkRenderWindow> renderWindow =	vtkSmartPointer<vtkRenderWindow>::New();
 	renderWindow->SetSize(200* 1,200); //(width, height)
@@ -656,7 +995,7 @@ int main(int argc, char *argv[])
 	renderer->AddActor(actor);
 
 	vtkSmartPointer<vtkPolyDataMapper> mapper1 =	vtkSmartPointer<vtkPolyDataMapper>::New();
-	mapper1->SetInputData(BoundaryPolynormalGenerator->GetOutput());
+	mapper1->SetInputData(BoundaryPoly);
 	vtkSmartPointer<vtkActor> actor1 = vtkSmartPointer<vtkActor>::New();
 	actor1->SetMapper(mapper1);
 	actor1->GetProperty()->SetColor(0.0, 0.0, 1.0); //(R,G,B)
@@ -669,7 +1008,7 @@ int main(int argc, char *argv[])
 	actor2->SetMapper(mapper2);
 	actor2->GetProperty()->SetColor(0.0, 1.0, 0.0); //(R,G,B)
 //	actor2->GetProperty()->SetOpacity(0.1);
-//	renderer->AddActor(actor2);
+	renderer->AddActor(actor2);
 
 	renderer->SetBackground(1.0, 1.0, 1.0);
 
@@ -678,21 +1017,22 @@ int main(int argc, char *argv[])
 	renderWindow->SetWindowName("Show Smoothed Points");
 
 	vtkSmartPointer<MouseInteractorStyle> style = vtkSmartPointer<MouseInteractorStyle>::New();
-	style->BoundaryPoly = BoundaryPolynormalGenerator->GetOutput();
+	style->BoundaryPoly = BoundaryPoly;
 	style->boundarypointLocator = boundarypointLocator;
+	style->BoundaryPolynormalGenerator = BoundaryPolynormalGenerator;
 
 	style->pointLocator = pointLocator;
 
 	style->SamplePoly = SamplePoly;
-	style->SampleCell = SampleCell;
-	style->pointflag = pointflag;
 	style->R = R;
 	style->F_abssum = F_abssum;
 	style->F_sumabs = F_sumabs;
 
 	style->connectionPolyData = connectionPolyData;
 	style->connectionCellArray = connectionCellArray;
-
+	
+	style->isControlPoint = isControlPoint;
+	style->ControlPointCoord = ControlPointCoord;
 
 	style->renderWindow = renderWindow;
 	style->ClickCount = 0;
