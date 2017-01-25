@@ -89,9 +89,9 @@ public:
 		for (int i = 0; i < SamplePoints->GetNumberOfPoints();)
 		{
 			double coordi[3] = { 0.0, 0.0, 0.0 };
-			coordi[0] = vtkMath::Random(-CRADIUS, CRADIUS);
-			coordi[1] = vtkMath::Random(-CRADIUS, CRADIUS);
-			coordi[2] = vtkMath::Random(-CRADIUS, CRADIUS);
+			coordi[0] = vtkMath::Random(-3.0 * CRADIUS, 3.0 * CRADIUS);
+			coordi[1] = vtkMath::Random(-3.0 * CRADIUS, 3.0 * CRADIUS);
+			coordi[2] = vtkMath::Random(-3.0 * CRADIUS, 3.0 * CRADIUS);
 
 			vtkIdType nearestboundaryPID = boundarypointLocator->FindClosestPoint(coordi);
 			double boundarycoord[3];
@@ -115,7 +115,7 @@ public:
 		return true;
 	}
 
-	bool UniformRedistribution()
+	bool UniformRedistribution(int iterationnumber)
 	{
 		if (BoundaryPolynormalGenerator == NULL)
 		{
@@ -129,14 +129,14 @@ public:
 			return false;
 		}
 
-		for (int iter = 0; iter < 200; iter ++)
+		for (int iter = 0; iter < iterationnumber; iter++)
 		{
-			for (vtkIdType i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i ++)
+			for (vtkIdType i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
 			{
 				double coordi[3];
 				SamplePoly->GetPoints()->GetPoint(i, coordi);
 				double Ri = R->GetValue(i);
-				
+
 				double Fi[3] = { 0.0, 0.0, 0.0 };
 				double Fi_c[3] = { 0.0, 0.0, 0.0 };
 				double Fi_p[3] = { 0.0, 0.0, 0.0 };
@@ -192,21 +192,22 @@ public:
 						for (int l = 0; l < 3; l++) Fij_p[l] = Fij_p_mode * dir[l];
 						for (int l = 0; l < 3; l++) Fi_p[l] += Fij_p[l];
 						Fpi_sumabs += vtkMath::Norm(Fij_p);
+
+						//	connections[i].push_back(j);
 					}
 				}
 
 				Fpi_abssum = vtkMath::Norm(Fi_p);
 
 				// combine Fi_cl and Fi_p
-				for (int l = 0; l < 3; l++) Fi[l] = Fi_c[l] + 1.0 * Fi_p[l];
+				for (int l = 0; l < 3; l++) Fi[l] = Fi_c[l] + 3.0 * Fi_p[l];
 
 				// move points based on force
-				if (vtkMath::Norm(Fi) > 10.0)
+				if (vtkMath::Norm(Fi) > 20.0)
 				{
 					vtkMath::Normalize(Fi);
-					for (int l = 0; l < 3; l++) Fi[l] = 10.0 * Fi[l];
+					for (int l = 0; l < 3; l++) Fi[l] = 20.0 * Fi[l];
 				}
-				
 				double coordi_new[3];
 				for (int l = 0; l < 3; l++) coordi_new[l] = coordi[l] + Fi[l] / POINTMASS * TIMESTEP;
 				//coordi_new[2] = 0.0; 
@@ -221,7 +222,7 @@ public:
 			for (int i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
 			{
 				double Ri = R->GetValue(i);
-				double delta_Ri_Max = 1.0 * TIMESTEP;
+				double delta_Ri_Max = 3.0 * TIMESTEP;
 
 				double delta_Ri = delta_Ri_Max;
 				double CondenseForce = F_sumabs->GetValue(i) - F_abssum->GetValue(i) - 5.5 * BorderForce; // 6 means hexagon grid mesh
@@ -230,17 +231,20 @@ public:
 				if (temp <= 0.05)
 					delta_Ri = delta_Ri_Max;
 				else
-					delta_Ri = -log(temp) * TIMESTEP;
+					delta_Ri = -3.0 * log(temp) * TIMESTEP;
 				if (delta_Ri > delta_Ri_Max)
 					delta_Ri = delta_Ri_Max;
 
 				Ri += delta_Ri;
 				Ri = Ri < 0.05 ? 0.05 : Ri;
-				Ri = Ri > 1.0? 1.0 : Ri;
+				Ri = Ri > 10.0 ? 10.0 : Ri;
 
 				R->SetValue(i, Ri);
 			}
+
 		}
+
+
 
 		return true;
 	}
@@ -400,7 +404,6 @@ public:
 			return false;
 		}
 
-
 		{
 			forces.clear();
 			for (int i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
@@ -429,10 +432,10 @@ public:
 				double forcescale = parameters[r][1];
 
 				double reletivedis = (dis + 1e-7) / (zerodistance + 1e-7);
-				//	double thisforcenorm = -log(reletivedis);
+				//double thisforcenorm = -log(reletivedis);
 				double thisforcenorm = -20.0 * forcescale * (reletivedis - 1.0);
-				thisforcenorm = thisforcenorm > 30.0 ? 30.0 : thisforcenorm;
-				thisforcenorm = thisforcenorm < -30.0 ? -30.0 : thisforcenorm;
+				thisforcenorm = thisforcenorm > 10.0 ? 10.0 : thisforcenorm;
+				thisforcenorm = thisforcenorm < -10.0 ? -10.0 : thisforcenorm;
 
 				double thisforce[3];
 				for (int l = 0; l < 3; l++)
@@ -478,7 +481,7 @@ public:
 			for (int i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
 			{
 				// move points according to forces
-				if (isControlPoint->GetValue(i) == 1)
+				if (isControlPoint->GetValue(i) != 0)
 				{
 					double coordi[3];
 					ControlPointCoord->GetTuple(i, coordi);
@@ -489,10 +492,10 @@ public:
 					double Fi[3];
 					for (int l = 0; l < 3; l++) Fi[l] = forces[i][l];
 
-					if (vtkMath::Norm(Fi) > 50.0)
+					if (vtkMath::Norm(Fi) > 10.0)
 					{
 						vtkMath::Normalize(Fi);
-						for (int l = 0; l < 3; l++) Fi[l] = 50.0 * Fi[l];
+						for (int l = 0; l < 3; l++) Fi[l] = 10.0 * Fi[l];
 					}
 
 					double coordi[3];
@@ -727,22 +730,13 @@ public:
 	{
 		std::string key = this->Interactor->GetKeySym();
 		
-		if (key == "a")
-		{
-			if (InitialPointcloud() == false)
-				return;
-			connectionCellArray->Modified();
-			connectionPolyData->Modified();
-			SamplePoly->Modified();
-			renderWindow->Render();
-		}
 
 		if (key == "s") // start to uniformly sampling
 		{
 		//	if (InitialPointcloud() == false)
 		//		return;
 
-			if (UniformRedistribution() == true)
+			if (UniformRedistribution(40) == true)
 			{
 				BuildRelationships();
 				BuildRelationshipsParameters();
@@ -756,6 +750,25 @@ public:
 			//	SavePolyData(SamplePoly, "C:\\work\\smooth_deformation_3D\\testdata\\SamplePoly.vtp");
 			}
 		}
+		else if (key == "a")
+		{
+			if (InitialPointcloud() == false)
+				return;
+
+			if (UniformRedistribution(200) == true)
+			{
+				BuildRelationships();
+				BuildRelationshipsParameters();
+				FindSurfaceControlPoints();
+
+				connectionCellArray->Modified();
+				connectionPolyData->Modified();
+				SamplePoly->Modified();
+				renderWindow->Render();
+
+				//	SavePolyData(SamplePoly, "C:\\work\\smooth_deformation_3D\\testdata\\SamplePoly.vtp");
+			}
+		}
 		else if (key == "Left")
 		{
 			if (ControlPointCoord == NULL)
@@ -766,7 +779,7 @@ public:
 				double boundarycoordi[3];
 				BoundaryPoly->GetPoint(i, boundarycoordi);
 				for (int l = 0; l < 1; l++)
-					boundarycoordi[l] = 0.95 * boundarycoordi[l];
+					boundarycoordi[l] = 0.99 * boundarycoordi[l];
 				BoundaryPoly->GetPoints()->SetPoint(i, boundarycoordi);
 			}
 			BoundaryPoly->GetPoints()->Modified();
@@ -784,6 +797,7 @@ public:
 				BoundaryPoly->GetPoint(RelatedBoundaryPids[i], newcontrolcoord);
 				ControlPointCoord->SetTuple(i, newcontrolcoord);
 			}
+
 		}
 		else if (key == "Right")
 		{
@@ -795,7 +809,7 @@ public:
 				double boundarycoordi[3];
 				BoundaryPoly->GetPoint(i, boundarycoordi);
 				for (int l = 0; l < 1; l++)
-					boundarycoordi[l] = 1.05 * boundarycoordi[l];
+					boundarycoordi[l] = 1.01 * boundarycoordi[l];
 				BoundaryPoly->GetPoints()->SetPoint(i, boundarycoordi);
 			}
 			BoundaryPoly->GetPoints()->Modified();
@@ -816,7 +830,7 @@ public:
 		}
 		else if (key == "g")
 		{
-			for (int iter = 0; iter < 100; iter ++)
+			for (int iter = 0; iter < 50; iter ++)
 			{
 				DeformationMotion();
 				connectionCellArray->Modified();
