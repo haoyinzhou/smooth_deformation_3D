@@ -296,11 +296,11 @@ public:
 
 		// refine connections
 		for (vtkIdType i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
-			for (int idj = 0; idj < this->Connections[i].size(); idj++)
+			for (unsigned int idj = 0; idj < this->Connections[i].size(); idj++)
 		{
 			vtkIdType j = this->Connections[i].at(idj);
 			bool flag_iinjfile = false;
-			for (int idk = 0; idk < this->Connections[j].size(); idk++)
+			for (unsigned int idk = 0; idk < this->Connections[j].size(); idk++)
 			{
 				if (i == this->Connections[j].at(idk))
 				{
@@ -314,7 +314,7 @@ public:
 
 		// build connectionCellArray for display
 		for (vtkIdType i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
-			for (int idj = 0; idj < this->Connections[i].size(); idj++)
+			for (unsigned int idj = 0; idj < this->Connections[i].size(); idj++)
 			{
 				vtkIdType j = this->Connections[i].at(idj);
 				if (j <= i)	continue;
@@ -415,7 +415,7 @@ public:
 
 				double** RelaxShape_local = new double*[Connections[i].size()];
 				double** CurrentShape_local = new double*[Connections[i].size()];
-				for (int j = 0; j < Connections[i].size(); j ++)
+				for (unsigned int j = 0; j < Connections[i].size(); j ++)
 				{
 					double RelaxCoord[3], CurrentCoord[3];
 
@@ -454,7 +454,7 @@ public:
 					RelaxShape_local_T[j] = new double[Connections[i].size()];
 
 				for (int j = 0; j < 3; j++)
-					for (int k = 0; k < Connections[i].size(); k++)
+					for (unsigned int k = 0; k < Connections[i].size(); k++)
 					{
 						RelaxShape_local_T[j][k] = RelaxShape_local[k][j];
 					}
@@ -485,7 +485,7 @@ public:
 				memcpy(&rot[2][0], &UVT[2][0], 3 * sizeof(double));
 
 				double** RelaxShape_local_rot = new double*[Connections[i].size()];
-				for (int j = 0; j < Connections[i].size(); j++)
+				for (unsigned int j = 0; j < Connections[i].size(); j++)
 				{
 					RelaxShape_local_rot[j] = new double[3];
 				}
@@ -546,7 +546,7 @@ public:
 				//}
 
 				// calculate force sent from i
-				for (int j = 0; j < Connections[i].size(); j++)
+				for (unsigned int j = 0; j < Connections[i].size(); j++)
 				{
 					double pid = Connections[i][j];
 					double CurrentCoord[3], GoalCoord[3];
@@ -572,7 +572,7 @@ public:
 				}
 
 				// delete memory
-				for (int j = 0; j < Connections[i].size(); j++)
+				for (unsigned int j = 0; j < Connections[i].size(); j++)
 				{
 					delete[] RelaxShape_local[j];
 					delete[] CurrentShape_local[j];
@@ -594,41 +594,6 @@ public:
 
 			}
 
-		/*	for (int r = 0; r < relationships.size(); r++)
-			{
-				vtkIdType pid1 = relationships[r][0];
-				vtkIdType pid2 = relationships[r][1];
-
-				double coord1[3], coord2[3];
-				SamplePoly->GetPoint(pid1, coord1);
-				SamplePoly->GetPoint(pid2, coord2);
-
-				double dir[3];
-				vtkMath::Subtract(coord1, coord2, dir);
-				double dis = vtkMath::Norm(dir);
-				vtkMath::Normalize(dir);
-
-				double zerodistance = parameters[r][0];
-				//	zerodistance = 0.5 * zerodistance;
-				double forcescale = parameters[r][1];
-
-				double reletivedis = (dis + 1e-7) / (zerodistance + 1e-7);
-				//double thisforcenorm = -log(reletivedis);
-				double thisforcenorm = -20.0 * forcescale * (reletivedis - 1.0);
-				thisforcenorm = thisforcenorm > 10.0 ? 10.0 : thisforcenorm;
-				thisforcenorm = thisforcenorm < -10.0 ? -10.0 : thisforcenorm;
-
-				double thisforce[3];
-				for (int l = 0; l < 3; l++)
-					thisforce[l] = thisforcenorm * dir[l];
-
-				for (int l = 0; l < 3; l++)
-				{
-					forces[pid1][l] = forces[pid1][l] + thisforce[l];
-					forces[pid2][l] = forces[pid2][l] - thisforce[l];
-				}
-			}
-		*/
 			//// add boundary force
 			//for (int i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
 			//{
@@ -725,7 +690,6 @@ public:
 			if (UniformRedistribution(10) == true)
 			{
 				BuildConnections();
-			//	BuildRelationshipsParameters();
 				FindSurfaceControlPoints();
 
 				connectionCellArray->Modified();
@@ -813,7 +777,7 @@ public:
 			}
 		}
 
-		else if (key == "Down")
+/*		else if (key == "Down")
 		{
 			if (ControlPointCoord == NULL)
 				return;
@@ -902,9 +866,12 @@ public:
 				ControlPointCoord->SetTuple(i, newcontrolcoord);
 			}
 		}
-
+*/
 
 	}
+
+
+
 
 public:
 
@@ -1127,12 +1094,6 @@ int main(int argc, char *argv[])
 
 	return EXIT_SUCCESS;
 }
-
-
-
-
-
-
 
 void SaveVTKImage(vtkImageData *image, const char* fileName)
 {
@@ -1385,64 +1346,6 @@ int BuildConnectionMap(vtkPoints* points_in, vtkPointLocator* pointLocator, doub
 }
 
 
-
-// Given three colinear points p, q, r, the function checks if
-// point q lies on line segment 'pr'
-bool onSegment(MyPoint p, MyPoint q, MyPoint r)
-{
-	if (q.x <= vtkMath::Max(p.x, r.x) && q.x >= vtkMath::Min(p.x, r.x) &&
-		q.y <= vtkMath::Max(p.y, r.y) && q.y >= vtkMath::Min(p.y, r.y))
-		return true;
-
-	return false;
-}
-
-// To find orientation of ordered triplet (p, q, r).
-// The function returns following values
-// 0 --> p, q and r are colinear
-// 1 --> Clockwise
-// 2 --> Counterclockwise
-int orientation(MyPoint p, MyPoint q, MyPoint r)
-{
-	// for details of below formula.
-	int val = (q.y - p.y) * (r.x - q.x) -
-		(q.x - p.x) * (r.y - q.y);
-
-	if (val == 0) return 0;  // colinear
-
-	return (val > 0)? 1: 2; // clock or counterclock wise
-}
-
-// The main function that returns true if line segment 'p1q1'
-// and 'p2q2' intersect.
-bool doIntersect(MyPoint p1, MyPoint q1, MyPoint p2, MyPoint q2)
-{
-	// Find the four orientations needed for general and
-	// special cases
-	int o1 = orientation(p1, q1, p2);
-	int o2 = orientation(p1, q1, q2);
-	int o3 = orientation(p2, q2, p1);
-	int o4 = orientation(p2, q2, q1);
-
-	// General case
-	if (o1 != o2 && o3 != o4)
-		return true;
-
-	// Special Cases
-	// p1, q1 and p2 are colinear and p2 lies on segment p1q1
-	if (o1 == 0 && onSegment(p1, p2, q1)) return true;
-
-	// p1, q1 and p2 are colinear and q2 lies on segment p1q1
-	if (o2 == 0 && onSegment(p1, q2, q1)) return true;
-
-	// p2, q2 and p1 are colinear and p1 lies on segment p2q2
-	if (o3 == 0 && onSegment(p2, p1, q2)) return true;
-
-	// p2, q2 and q1 are colinear and q1 lies on segment p2q2
-	if (o4 == 0 && onSegment(p2, q1, q2)) return true;
-
-	return false; // Doesn't fall in any of the above cases
-}
 
 
 
