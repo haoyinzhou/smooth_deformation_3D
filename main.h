@@ -60,6 +60,20 @@ const int range = 5;
 #define CRADIUS 5.0
 #define N 500
 
+class CForce
+{
+public:
+	double x;
+	double y;
+	double z;
+public:
+	CForce()
+	{
+		x = 0.0;
+		y = 0.0;
+		z = 0.0;
+	}
+};
 
 void SaveVTKImage(vtkImageData *image, const char* fileName);
 

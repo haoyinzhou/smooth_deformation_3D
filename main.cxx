@@ -59,10 +59,9 @@ public:
 	MouseInteractorStyle() 
 	{
 		SamplePoly = vtkSmartPointer<vtkPolyData>::New();
-
 		isControlPoint = vtkSmartPointer<vtkIdTypeArray>::New();
-
 		ControlPointCoord = vtkSmartPointer<vtkDoubleArray>::New();
+		RelaxShape = vtkSmartPointer<vtkPoints>::New();
 	}
 
 	~MouseInteractorStyle(){	}
@@ -82,8 +81,8 @@ public:
 		}
 
 		connectionCellArray->Reset();
-		relationships.clear();
-		parameters.clear();
+	//	relationships.clear();
+	//	parameters.clear();
 
 		vtkSmartPointer<vtkPoints> SamplePoints = SamplePoly->GetPoints();
 		for (int i = 0; i < SamplePoints->GetNumberOfPoints();)
@@ -166,7 +165,7 @@ public:
 				double Fpi_sumabs = 0.0;
 				vtkSmartPointer<vtkIdList> NeighorpIds = vtkSmartPointer<vtkIdList>::New();
 				//pointLocator->FindPointsWithinRadius(4.0, coordi, NeighorpIds);
-				pointLocator->FindClosestNPoints(20, coordi, NeighorpIds);
+				pointLocator->FindClosestNPoints(10, coordi, NeighorpIds);
 
 				for (int idxj = 0; idxj < NeighorpIds->GetNumberOfIds(); idxj++)
 				{
@@ -208,11 +207,13 @@ public:
 					vtkMath::Normalize(Fi);
 					for (int l = 0; l < 3; l++) Fi[l] = 20.0 * Fi[l];
 				}
-				double coordi_new[3];
-				for (int l = 0; l < 3; l++) coordi_new[l] = coordi[l] + Fi[l] / POINTMASS * TIMESTEP;
-				//coordi_new[2] = 0.0; 
 
-				SamplePoly->GetPoints()->SetPoint(i, coordi_new);
+				{
+					double coordi_new[3];
+					for (int l = 0; l < 3; l++) coordi_new[l] = coordi[l] + Fi[l] / POINTMASS * TIMESTEP;
+					SamplePoly->GetPoints()->SetPoint(i, coordi_new);
+				}
+
 				F_abssum->SetValue(i, Fpi_abssum);
 				F_sumabs->SetValue(i, Fpi_sumabs);
 			}
@@ -241,21 +242,17 @@ public:
 
 				R->SetValue(i, Ri);
 			}
-
 		}
-
-
 
 		return true;
 	}
 
-	bool BuildRelationships()
+	bool BuildConnections()
 	{
-		vector< vector<vtkIdType> > connections(SamplePoly->GetPoints()->GetNumberOfPoints());
+		this->Connections.clear();
 
 		// draw the connections
 		connectionCellArray->Reset();
-		relationships.clear();
 
 		for (vtkIdType i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
 		{
@@ -265,7 +262,9 @@ public:
 
 			vtkSmartPointer<vtkIdList> NeighorpIds = vtkSmartPointer<vtkIdList>::New();
 			//pointLocator->FindPointsWithinRadius(4.0, coordi, NeighorpIds);
-			pointLocator->FindClosestNPoints(20, coordi, NeighorpIds);
+			pointLocator->FindClosestNPoints(10, coordi, NeighorpIds);
+
+			vector<vtkIdType> Connection_i;
 
 			for (int idxj = 0; idxj < NeighorpIds->GetNumberOfIds(); idxj++)
 			{
@@ -283,71 +282,64 @@ public:
 				double R_total = Ri + Rj;
 
 				if (dis < 0.60 * R_total)
-					connections[i].push_back(j);
+					Connection_i.push_back(j);
 			}
+
+			this->Connections.push_back(Connection_i);
 		}
+
 		// refine connections
 		for (vtkIdType i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
-			for (int idj = 0; idj < connections[i].size(); idj++)
+			for (int idj = 0; idj < this->Connections[i].size(); idj++)
 		{
-			vtkIdType j = connections[i].at(idj);
+			vtkIdType j = this->Connections[i].at(idj);
 			bool flag_iinjfile = false;
-			for (int idk = 0; idk < connections[j].size(); idk++)
+			for (int idk = 0; idk < this->Connections[j].size(); idk++)
 			{
-				if (i == connections[j].at(idk))
+				if (i == this->Connections[j].at(idk))
 				{
 					flag_iinjfile = true;
 					break;
 				}
 			}
 			if (flag_iinjfile == false)
-				connections[j].push_back(i);
+				this->Connections[j].push_back(i);
 		}
 
-		// build relationships
+		// build connectionCellArray for display
 		for (vtkIdType i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
-			for (int idj = 0; idj < connections[i].size(); idj++)
-		{
-			vtkIdType j = connections[i].at(idj);
-			if (j <= i)	continue;
-			vtkSmartPointer<vtkLine> line = vtkSmartPointer<vtkLine>::New();
-			line->GetPointIds()->SetId(0, i);
-			line->GetPointIds()->SetId(1, j);
-			connectionCellArray->InsertNextCell(line);
-
-			vector<vtkIdType> thisconnection;
-			thisconnection.push_back(i);
-			thisconnection.push_back(j);
-			relationships.push_back(thisconnection);
-		}
-		
-		return true;
-	}
-
-	bool BuildRelationshipsParameters()
-	{
-		if (relationships.size() == 0)
-			return false;
-
-		parameters.clear();
-
-		for (int r = 0; r < relationships.size(); r ++)
-		{
-			double coord1[3], coord2[3];
-			SamplePoly->GetPoint(relationships[r][0], coord1);
-			SamplePoly->GetPoint(relationships[r][1], coord2);
-
-			vector<double> thisparam;
-			double dis = sqrt(vtkMath::Distance2BetweenPoints(coord1, coord2));
-			thisparam.push_back(dis);
-			double forcescale = 1.0; // should be different for different parts
-			thisparam.push_back(forcescale);
-
-			parameters.push_back(thisparam);
-		}
+			for (int idj = 0; idj < this->Connections[i].size(); idj++)
+			{
+				vtkIdType j = this->Connections[i].at(idj);
+				if (j <= i)	continue;
+				vtkSmartPointer<vtkLine> line = vtkSmartPointer<vtkLine>::New();
+				line->GetPointIds()->SetId(0, i);
+				line->GetPointIds()->SetId(1, j);
+				connectionCellArray->InsertNextCell(line);
+			}
 
 		return true;
 	}
+
+	//bool BuildRelationshipsParameters()
+	//{
+	//	if (relationships.size() == 0)
+	//		return false;
+	//	parameters.clear();
+	//	for (int r = 0; r < relationships.size(); r ++)
+	//	{
+	//		double coord1[3], coord2[3];
+	//		SamplePoly->GetPoint(relationships[r][0], coord1);
+	//		SamplePoly->GetPoint(relationships[r][1], coord2);
+	//		vector<double> thisparam;
+	//		double dis = sqrt(vtkMath::Distance2BetweenPoints(coord1, coord2));
+	//		thisparam.push_back(dis);
+	//		double forcescale = 1.0; // should be different for different parts
+	//		thisparam.push_back(forcescale);
+	//		parameters.push_back(thisparam);
+	//	}
+	//	return true;
+	//}
 
 	bool FindSurfaceControlPoints()
 	{
@@ -385,11 +377,11 @@ public:
 
 	bool DeformationMotion()
 	{
-		if (relationships.size() == 0)
-			return false;
-		if (relationships.size() != parameters.size())
+		if (this->Connections.size() == 0)
 			return false;
 		if (isControlPoint == NULL)
+			return false;
+		if (RelaxShape == NULL)
 			return false;
 
 		if (BoundaryPolynormalGenerator == NULL)
@@ -403,17 +395,197 @@ public:
 			std::cerr << "cannot find BoundaryNormalArray" << std::endl;
 			return false;
 		}
-
+		
 		{
-			forces.clear();
-			for (int i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
+			vtkSmartPointer<vtkPoints> SamplePoints = SamplePoly->GetPoints();
+			std::memset(&forces.at(0), 0, forces.size() * sizeof(CForce));
+
+			for (int i = 0; i < RelaxShape->GetNumberOfPoints(); i++)
 			{
-				vector<double> forcei;
-				for (int l = 0; l < 3; l++) forcei.push_back(0.0);
-				forces.push_back(forcei);
+				double RelaxCenter[3];
+				RelaxShape->GetPoint(i, RelaxCenter);
+				double CurrentCenter[3];
+				SamplePoints->GetPoint(i, CurrentCenter);
+
+				double** RelaxShape_local = new double*[Connections[i].size()];
+				double** CurrentShape_local = new double*[Connections[i].size()];
+				for (int j = 0; j < Connections[i].size(); j ++)
+				{
+					double RelaxCoord[3], CurrentCoord[3];
+
+					RelaxShape->GetPoint(Connections[i][j], RelaxCoord);
+					SamplePoints->GetPoint(Connections[i][j], CurrentCoord);
+
+					vtkMath::Subtract(RelaxCoord, RelaxCenter, RelaxCoord);
+					vtkMath::Subtract(CurrentCoord, CurrentCenter, CurrentCoord);
+					
+					RelaxShape_local[j] = new double[3];
+					CurrentShape_local[j] = new double[3];
+
+					for (int l = 0; l < 3; l ++)
+					{
+						RelaxShape_local[j][l] = RelaxCoord[l];
+						CurrentShape_local[j][l] = CurrentCoord[l];
+					}
+				}
+
+				// add a syn rotation
+				//double** rot = new double*[3];
+				//for (int j = 0; j < 3; j++)
+				//	rot[j] = new double[3];
+				//rot[0][0] = 0.8754; rot[0][1] = 0.2346; rot[0][2] = -0.4226;
+				//rot[1][0] = -0.2588; rot[1][1] = 0.9659; rot[1][2] = 0;
+				//rot[2][0] = 0.4082; rot[2][1] = 0.1094; rot[2][2] = 0.9063;
+				//vtkMath::MultiplyMatrix(RelaxShape_local, rot, Connections[i].size(), 3, 3, 3, CurrentShape_local);
+				//
+				//for (int j = 0; j < 3; j++)
+				//	delete[] rot[j];
+				//delete[] rot;
+
+				// calculate rotation
+				double** RelaxShape_local_T = new double*[3];
+				for (int j = 0; j < 3; j++)
+					RelaxShape_local_T[j] = new double[Connections[i].size()];
+
+				for (int j = 0; j < 3; j++)
+					for (int k = 0; k < Connections[i].size(); k++)
+					{
+						RelaxShape_local_T[j][k] = RelaxShape_local[k][j];
+					}
+
+				double** C = new double*[3];
+				for (int j = 0; j < 3; j++)
+				{
+					C[j] = new double[3];
+				}
+
+				vtkMath::MultiplyMatrix(RelaxShape_local_T, CurrentShape_local, 3, Connections[i].size(), Connections[i].size(), 3, C);
+				double A[3][3];
+				memcpy(&A[0][0], &C[0][0], 3 * sizeof(double));
+				memcpy(&A[1][0], &C[1][0], 3 * sizeof(double));
+				memcpy(&A[2][0], &C[2][0], 3 * sizeof(double));
+
+				double U[3][3], w[3], VT[3][3];
+				vtkMath::SingularValueDecomposition3x3(A, U, w, VT);
+
+				double UVT[3][3];
+				vtkMath::Multiply3x3(U, VT, UVT);
+				
+				double** rot = new double*[3];
+				for (int j = 0; j < 3; j++)
+					rot[j] = new double[3];
+				memcpy(&rot[0][0], &UVT[0][0], 3 * sizeof(double));
+				memcpy(&rot[1][0], &UVT[1][0], 3 * sizeof(double));
+				memcpy(&rot[2][0], &UVT[2][0], 3 * sizeof(double));
+
+				double** RelaxShape_local_rot = new double*[Connections[i].size()];
+				for (int j = 0; j < Connections[i].size(); j++)
+				{
+					RelaxShape_local_rot[j] = new double[3];
+				}
+				
+				vtkMath::MultiplyMatrix(RelaxShape_local, rot, Connections[i].size(), 3, 3, 3, RelaxShape_local_rot);
+				
+				//if (i < 5)
+				//{
+				//	//std::cout << "i = " << i << std::endl;
+				//	//std::cout << "CurrentShape_local = " << std::endl;
+				//	//for (int k = 0; k < Connections[i].size(); k++)
+				//	//{
+				//	//	std::cout << CurrentShape_local[k][0] << ", " << CurrentShape_local[k][1] << ", " << CurrentShape_local[k][2] << std::endl;
+				//	//}
+				//	//std::cout << "RelaxShape_local_rot = " << std::endl;
+				//	//for (int k = 0; k < Connections[i].size(); k++)
+				//	//{
+				//	//	std::cout << RelaxShape_local_rot[k][0] << ", " << RelaxShape_local_rot[k][1] << ", " << RelaxShape_local_rot[k][2] << std::endl;
+				//	//}
+				//	//std::cout << "CurrentShape_local_T = " << std::endl;
+				//	//for (int j = 0; j < 3; j++)
+				//	//{
+				//	//	for (int k = 0; k < Connections[i].size(); k ++)
+				//	//		std::cout << CurrentShape_local_T[j][k] << ", ";
+				//	//	std::cout << std::endl;
+				//	//}	
+				//	//
+				//	//std::cout << "RelaxShape_local = " << std::endl;
+				//	//for (int k = 0; k < Connections[i].size(); k++)
+				//	//{
+				//	//	std::cout << RelaxShape_local[k][0] << ", " << RelaxShape_local[k][1] << ", " << RelaxShape_local[k][2] << std::endl;
+				//	//}
+				//	//std::cout << "RelaxShape_local_rot = " << std::endl;
+				//	//for (int k = 0; k < Connections[i].size(); k++)
+				//	//{
+				//	//	std::cout << RelaxShape_local_rot[k][0] << ", " << RelaxShape_local_rot[k][1] << ", " << RelaxShape_local_rot[k][2] << std::endl;
+				//	//}
+				//	//std::cout << "C = " << std::endl;
+				//	//for (int j = 0; j < 3; j++)
+				//	//{
+				//	//	for (int k = 0; k < 3; k++)
+				//	//		std::cout << C[j][k] << ", ";
+				//	//	std::cout << std::endl;
+				//	//}
+				//	//std::cout << "A = " << std::endl;
+				//	//for (int j = 0; j < 3; j++)
+				//	//{
+				//	//	for (int k = 0; k < 3; k++)
+				//	//		std::cout << A[j][k] << ", ";
+				//	//	std::cout << std::endl;
+				//	//}
+				//	//std::cout << "UVT = " << std::endl;
+				//	//for (int j = 0; j < 3; j++)
+				//	//{
+				//	//	std::cout << UVT[j][0] << ", " << UVT[j][1] << ", " << UVT[j][2] << std::endl;
+				//	//}
+				//	//std::cout << "w = " << w[0] << ", " << w[1] << ", " << w[2] << std::endl;
+				//}
+
+				// calculate force sent from i
+				for (int j = 0; j < Connections[i].size(); j++)
+				{
+					double pid = Connections[i][j];
+					double CurrentCoord[3], GoalCoord[3];
+					memcpy(CurrentCoord, &CurrentShape_local[j][0], 3 * sizeof(double));
+					memcpy(GoalCoord, &RelaxShape_local_rot[j][0], 3 * sizeof(double));
+
+					double dir2goal[3];
+					vtkMath::Subtract(GoalCoord, CurrentCoord, dir2goal);
+					double dis2goal = vtkMath::Norm(dir2goal);
+					vtkMath::Normalize(dir2goal);
+
+					double force_i2pid[3];
+					double force_i2pidnorm = 10 * dis2goal;
+					//force_i2pidnorm = force_i2pidnorm > 10.0 ? 10.0 : force_i2pidnorm;
+					for (int l = 0; l < 3; l++)	force_i2pid[l] = force_i2pidnorm * dir2goal[l];
+
+					forces[pid].x = forces[pid].x + force_i2pid[0];
+					forces[pid].y = forces[pid].y + force_i2pid[1];
+					forces[pid].z = forces[pid].z + force_i2pid[2];
+				}
+
+				// delete memory
+				for (int j = 0; j < Connections[i].size(); j++)
+				{
+					delete[] RelaxShape_local[j];
+					delete[] CurrentShape_local[j];
+					delete[] RelaxShape_local_rot[j];
+				}
+				delete[] RelaxShape_local;
+				delete[] CurrentShape_local;
+				delete[] RelaxShape_local_rot;
+
+				for (int j = 0; j < 3; j++)
+					delete[] RelaxShape_local_T[j];
+				delete[] RelaxShape_local_T;
+				for (int j = 0; j < 3; j++)
+					delete[] C[j];
+				delete[] C;
+				for (int j = 0; j < 3; j++)
+					delete[] rot[j];
+				delete[] rot;
+
 			}
 
-			for (int r = 0; r < relationships.size(); r++)
+		/*	for (int r = 0; r < relationships.size(); r++)
 			{
 				vtkIdType pid1 = relationships[r][0];
 				vtkIdType pid2 = relationships[r][1];
@@ -447,7 +619,7 @@ public:
 					forces[pid2][l] = forces[pid2][l] - thisforce[l];
 				}
 			}
-
+		*/
 			//// add boundary force
 			//for (int i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
 			//{
@@ -483,19 +655,36 @@ public:
 				// move points according to forces
 				if (isControlPoint->GetValue(i) != 0)
 				{
-					double coordi[3];
-					ControlPointCoord->GetTuple(i, coordi);
-					SamplePoly->GetPoints()->SetPoint(i, coordi);
+					double GoalCoord[3];
+					ControlPointCoord->GetTuple(i, GoalCoord);
+					double CurrentCoord[3];
+					SamplePoly->GetPoint(i, CurrentCoord);
+
+					double dir2goal[3];
+					vtkMath::Subtract(GoalCoord, CurrentCoord, dir2goal);
+					double dis2goal = vtkMath::Norm(dir2goal);
+					vtkMath::Normalize(dir2goal);
+
+					double Fi[3];
+					double force_i2pidnorm = 10 * dis2goal;
+					force_i2pidnorm = force_i2pidnorm > 50.0 ? 50.0 : force_i2pidnorm;
+					for (int l = 0; l < 3; l++)	Fi[l] = force_i2pidnorm * dir2goal[l];
+
+					double coordnew[3];
+					for (int l = 0; l < 3; l++) coordnew[l] = CurrentCoord[l] + Fi[l] / POINTMASS * TIMESTEP;
+					SamplePoly->GetPoints()->SetPoint(i, coordnew);
 				}
 				else
 				{
 					double Fi[3];
-					for (int l = 0; l < 3; l++) Fi[l] = forces[i][l];
+					Fi[0] = forces[i].x;
+					Fi[1] = forces[i].y;
+					Fi[2] = forces[i].z;
 
-					if (vtkMath::Norm(Fi) > 10.0)
+					if (vtkMath::Norm(Fi) > 50.0)
 					{
 						vtkMath::Normalize(Fi);
-						for (int l = 0; l < 3; l++) Fi[l] = 10.0 * Fi[l];
+						vtkMath::MultiplyScalar(Fi, 50.0);
 					}
 
 					double coordi[3];
@@ -504,7 +693,7 @@ public:
 					SamplePoly->GetPoints()->SetPoint(i, coordi);
 				}
 			}
-
+		
 			//connectionCellArray->Modified();
 			//connectionPolyData->Modified();
 			//SamplePoly->Modified();
@@ -514,232 +703,20 @@ public:
 		return true;
 	}
 
-	virtual void OnRightButtonDown()
-	{
-		ClickCount++;
-
-	//	SavePolyData(BoundaryPoly, "C:\\work\\smooth_deformation_3D\\testdata\\BoundaryPoly.vtp");
-		vector< vector<vtkIdType> > connections(SamplePoly->GetPoints()->GetNumberOfPoints());
-
-		vtkFloatArray* BoundaryNormalArray = vtkFloatArray::SafeDownCast(BoundaryPoly->GetPointData()->GetArray("Normals"));
-		if (BoundaryNormalArray == NULL)
-		{
-			std::cerr << "cannot find BoundaryNormalArray" << std::endl;
-			return;
-		}
-
-		for (int iter = 0; iter < 200; iter++)
-		{
-			for (vtkIdType i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
-			{
-				double coordi[3];
-				SamplePoly->GetPoints()->GetPoint(i, coordi);
-				double Ri = R->GetValue(i);
-
-				double diri[3] = { 0.0, 0.0, 0.0 };
-				for (int l = 0; l < 3; l++) diri[l] = coordi[l];
-				vtkMath::Normalize(diri);
-
-				double Fi[3] = { 0.0, 0.0, 0.0 };
-				double Fi_c[3] = { 0.0, 0.0, 0.0 };
-				double Fi_p[3] = { 0.0, 0.0, 0.0 };
-
-				// force between center and this point
-				{
-					vtkIdType nearestboundaryPID = boundarypointLocator->FindClosestPoint(coordi);
-					double boundarycoord[3];
-					BoundaryPoly->GetPoint(nearestboundaryPID, boundarycoord);
-					double dir_p2boundary[3];
-					vtkMath::Subtract(boundarycoord, coordi, dir_p2boundary);
-					vtkMath::Normalize(dir_p2boundary);
-					double boundarynormal[3];
-					BoundaryNormalArray->GetTuple(nearestboundaryPID, boundarynormal);
-
-					double F_mode_c = 0.0;
-					if (vtkMath::Dot(dir_p2boundary, boundarynormal) > 0)
-						F_mode_c = 0.0;
-					else
-						F_mode_c = -1000.0;
-
-					for (int l = 0; l < 3; l++) Fi_c[l] += F_mode_c * boundarynormal[l];
-				}
-
-				// force between points
-				double Fpi_abssum = 0.0;
-				double Fpi_sumabs = 0.0;
-				vtkSmartPointer<vtkIdList> NeighorpIds = vtkSmartPointer<vtkIdList>::New();
-				//pointLocator->FindPointsWithinRadius(4.0, coordi, NeighorpIds);
-				pointLocator->FindClosestNPoints(20, coordi, NeighorpIds);
-
-				for (int idxj = 0; idxj < NeighorpIds->GetNumberOfIds(); idxj++)
-				{
-					vtkIdType j = NeighorpIds->GetId(idxj);
-					if (i == j) continue;
-
-					double coordj[3];
-					SamplePoly->GetPoint(j, coordj);
-
-					double dir[3];
-					vtkMath::Subtract(coordi, coordj, dir);
-					double dis = vtkMath::Norm(dir);
-					vtkMath::Normalize(dir);
-
-					double Rj = R->GetValue(j);
-					double R_total = Ri + Rj;
-
-					if (dis < 0.55 * R_total)
-					{
-						double temp = 0.5 / R_total * dis + 0.5;
-						double Fij_p_mode = (1.0 / (temp*temp*temp*temp*temp*temp) - 1.0 / (temp));
-						double Fij_p[3] = { 0.0, 0.0, 0.0 };
-						for (int l = 0; l < 3; l++) Fij_p[l] = Fij_p_mode * dir[l];
-						for (int l = 0; l < 3; l++) Fi_p[l] += Fij_p[l];
-						Fpi_sumabs += vtkMath::Norm(Fij_p);
-
-						//	connections[i].push_back(j);
-					}
-				}
-
-				Fpi_abssum = vtkMath::Norm(Fi_p);
-
-				// combine Fi_cl and Fi_p
-				for (int l = 0; l < 3; l++) Fi[l] = Fi_c[l] + 1.0 * Fi_p[l];
-
-				// move points based on force
-				if (vtkMath::Norm(Fi) > 10.0)
-				{
-					vtkMath::Normalize(Fi);
-					for (int l = 0; l < 3; l++) Fi[l] = 10.0 * Fi[l];
-				}
-				double coordi_new[3];
-				for (int l = 0; l < 3; l++) coordi_new[l] = coordi[l] + Fi[l] / POINTMASS * TIMESTEP;
-				//coordi_new[2] = 0.0; 
-
-				SamplePoly->GetPoints()->SetPoint(i, coordi_new);
-				F_abssum->SetValue(i, Fpi_abssum);
-				F_sumabs->SetValue(i, Fpi_sumabs);
-			}
-
-			// update radius Ri
-			//double meanR = CRADIUS * CRADIUS / SamplePoints->GetNumberOfPoints();
-			for (int i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
-			{
-				double Ri = R->GetValue(i);
-				double delta_Ri_Max = 1.0 * TIMESTEP;
-
-				double delta_Ri = delta_Ri_Max;
-				double CondenseForce = F_sumabs->GetValue(i) - F_abssum->GetValue(i) - 5.5 * BorderForce; // 6 means hexagon grid mesh
-				//	delta_Ri = (delta_Ri_Max + 1.0 - 0.1 * exp(CondenseForce / Hardness)) * timestep;	
-				double temp = 1.0 + 0.003 * CondenseForce;
-				if (temp <= 0.05)
-					delta_Ri = delta_Ri_Max;
-				else
-					delta_Ri = -log(temp) * TIMESTEP;
-				if (delta_Ri > delta_Ri_Max)
-					delta_Ri = delta_Ri_Max;
-
-				Ri += delta_Ri;
-				Ri = Ri < 0.05 ? 0.05 : Ri;
-				Ri = Ri > 10.0 ? 10.0 : Ri;
-
-				R->SetValue(i, Ri);
-			}
-		}
-			// draw the connections
-			if (ClickCount > 0.0)
-			{
-				connectionCellArray->Reset();
-				relationships.clear();
-
-				for (vtkIdType i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
-				{
-					double coordi[3];
-					SamplePoly->GetPoints()->GetPoint(i, coordi);
-					double Ri = R->GetValue(i);
-
-					vtkSmartPointer<vtkIdList> NeighorpIds = vtkSmartPointer<vtkIdList>::New();
-					//pointLocator->FindPointsWithinRadius(4.0, coordi, NeighorpIds);
-					pointLocator->FindClosestNPoints(20, coordi, NeighorpIds);
-
-					for (int idxj = 0; idxj < NeighorpIds->GetNumberOfIds(); idxj++)
-					{
-						vtkIdType j = NeighorpIds->GetId(idxj);
-						if (i == j) continue;
-
-						double coordj[3];
-						SamplePoly->GetPoints()->GetPoint(j, coordj);
-
-						double dir[3];
-						vtkMath::Subtract(coordi, coordj, dir);
-						double dis = vtkMath::Norm(dir);
-
-						double Rj = R->GetValue(j);
-						double R_total = Ri + Rj;
-
-						if (dis < 0.60 * R_total)
-							connections[i].push_back(j);
-					}
-				}
-				// refine connections
-				for (vtkIdType i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
-					for (int idj = 0; idj < connections[i].size(); idj++)
-				{
-					vtkIdType j = connections[i].at(idj);
-					bool flag_iinjfile = false;
-					for (int idk = 0; idk < connections[j].size(); idk++)
-					{
-						if (i == connections[j].at(idk))
-						{
-							flag_iinjfile = true;
-							break;
-						}
-					}
-					if (flag_iinjfile == false)
-						connections[j].push_back(i);
-				}
-
-				for (vtkIdType i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
-					for (int idj = 0; idj < connections[i].size(); idj++)
-				{
-					vtkIdType j = connections[i].at(idj);
-					if (j <= i)	continue;
-					vtkSmartPointer<vtkLine> line = vtkSmartPointer<vtkLine>::New();
-					line->GetPointIds()->SetId(0, i);
-					line->GetPointIds()->SetId(1, j);
-					connectionCellArray->InsertNextCell(line);
-
-					vector<vtkIdType> thisconnection;
-					thisconnection.push_back(i);
-					thisconnection.push_back(j);
-					relationships.push_back(thisconnection);
-				}
-
-				connectionCellArray->Modified();
-				connectionPolyData->Modified();
-			}
-
-
-		SamplePoly->Modified();
-		renderWindow->Render();
-
-		std::cout << "connectionCellArray = " << connectionCellArray->GetNumberOfCells() << ", relationships = " << relationships.size() << std::endl;
-		std::cout << ClickCount << " calculation is done" << std::endl;
-	}
 
 	virtual void OnKeyPress()
 	{
 		std::string key = this->Interactor->GetKeySym();
-		
-
+	
 		if (key == "s") // start to uniformly sampling
 		{
 		//	if (InitialPointcloud() == false)
 		//		return;
 
-			if (UniformRedistribution(40) == true)
+			if (UniformRedistribution(10) == true)
 			{
-				BuildRelationships();
-				BuildRelationshipsParameters();
+				BuildConnections();
+			//	BuildRelationshipsParameters();
 				FindSurfaceControlPoints();
 
 				connectionCellArray->Modified();
@@ -747,28 +724,11 @@ public:
 				SamplePoly->Modified();
 				renderWindow->Render();
 
+				RelaxShape->DeepCopy(SamplePoly->GetPoints());
 			//	SavePolyData(SamplePoly, "C:\\work\\smooth_deformation_3D\\testdata\\SamplePoly.vtp");
 			}
 		}
-		else if (key == "a")
-		{
-			if (InitialPointcloud() == false)
-				return;
 
-			if (UniformRedistribution(200) == true)
-			{
-				BuildRelationships();
-				BuildRelationshipsParameters();
-				FindSurfaceControlPoints();
-
-				connectionCellArray->Modified();
-				connectionPolyData->Modified();
-				SamplePoly->Modified();
-				renderWindow->Render();
-
-				//	SavePolyData(SamplePoly, "C:\\work\\smooth_deformation_3D\\testdata\\SamplePoly.vtp");
-			}
-		}
 		else if (key == "Left")
 		{
 			if (ControlPointCoord == NULL)
@@ -830,7 +790,8 @@ public:
 		}
 		else if (key == "g")
 		{
-			for (int iter = 0; iter < 50; iter ++)
+			forces.resize(SamplePoly->GetPoints()->GetNumberOfPoints());
+			for (int iter = 0; iter < 20; iter ++)
 			{
 				DeformationMotion();
 				connectionCellArray->Modified();
@@ -838,6 +799,7 @@ public:
 				SamplePoly->Modified();
 				renderWindow->Render();
 			}
+		
 		//	BuildRelationshipsParameters();
 		}	
 
@@ -861,14 +823,16 @@ public:
 	vtkDoubleArray* R;	// radius
 	vtkDoubleArray* F_sumabs;	// force with respect to other points
 	vtkDoubleArray* F_abssum;	// force with respect to other points
+	vtkSmartPointer<vtkPoints> RelaxShape;
 
 	vtkSmartPointer<vtkIdTypeArray> isControlPoint;
 	vtkSmartPointer<vtkDoubleArray> ControlPointCoord;
 	vector<vtkIdType> RelatedBoundaryPids;
 
-	vector< vector<vtkIdType> > relationships; // each one has two points ids.
-	vector< vector<double> > parameters; // each one has some parameters for calculating forces
-	vector< vector<double> > forces;		// forces used in phrase 2
+	vector< vector<vtkIdType> > Connections;
+//	vector< vector<vtkIdType> > relationships; // each one has two points ids.
+//	vector< vector<double> > parameters; // each one has some parameters for calculating forces
+	vector< CForce > forces;		// forces used in phrase 2
 	
 	vtkPolyData* connectionPolyData;
 	vtkCellArray* connectionCellArray;
