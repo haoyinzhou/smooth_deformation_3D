@@ -62,6 +62,12 @@ public:
 		isControlPoint = vtkSmartPointer<vtkIdTypeArray>::New();
 		ControlPointCoord = vtkSmartPointer<vtkDoubleArray>::New();
 		RelaxShape = vtkSmartPointer<vtkPoints>::New();
+
+		pushballcenter[0] = 0.0;
+		pushballcenter[1] = 0.0;
+		pushballcenter[2] = 9.0;
+		pushballradius = 4.0;
+
 	}
 
 	~MouseInteractorStyle(){	}
@@ -560,6 +566,9 @@ public:
 					forces[pid].x = forces[pid].x + force_i2pid[0];
 					forces[pid].y = forces[pid].y + force_i2pid[1];
 					forces[pid].z = forces[pid].z + force_i2pid[2];
+					forces[i].x = forces[i].x - force_i2pid[0];
+					forces[i].y = forces[i].y - force_i2pid[1];
+					forces[i].z = forces[i].z - force_i2pid[2];
 				}
 
 				// delete memory
@@ -681,10 +690,10 @@ public:
 					Fi[1] = forces[i].y;
 					Fi[2] = forces[i].z;
 
-					if (vtkMath::Norm(Fi) > 50.0)
+					if (vtkMath::Norm(Fi) > 20.0)
 					{
 						vtkMath::Normalize(Fi);
-						vtkMath::MultiplyScalar(Fi, 50.0);
+						vtkMath::MultiplyScalar(Fi, 20.0);
 					}
 
 					double coordi[3];
@@ -729,6 +738,21 @@ public:
 			}
 		}
 
+		else if (key == "g")
+		{
+			forces.resize(SamplePoly->GetPoints()->GetNumberOfPoints());
+			for (int iter = 0; iter < 20; iter++)
+			{
+				DeformationMotion();
+				connectionCellArray->Modified();
+				connectionPolyData->Modified();
+				SamplePoly->Modified();
+				renderWindow->Render();
+			}
+
+			//	BuildRelationshipsParameters();
+		}
+
 		else if (key == "Left")
 		{
 			if (ControlPointCoord == NULL)
@@ -739,7 +763,7 @@ public:
 				double boundarycoordi[3];
 				BoundaryPoly->GetPoint(i, boundarycoordi);
 				for (int l = 0; l < 1; l++)
-					boundarycoordi[l] = 0.99 * boundarycoordi[l];
+					boundarycoordi[l] = 0.95 * boundarycoordi[l];
 				BoundaryPoly->GetPoints()->SetPoint(i, boundarycoordi);
 			}
 			BoundaryPoly->GetPoints()->Modified();
@@ -769,7 +793,7 @@ public:
 				double boundarycoordi[3];
 				BoundaryPoly->GetPoint(i, boundarycoordi);
 				for (int l = 0; l < 1; l++)
-					boundarycoordi[l] = 1.01 * boundarycoordi[l];
+					boundarycoordi[l] = 1.05 * boundarycoordi[l];
 				BoundaryPoly->GetPoints()->SetPoint(i, boundarycoordi);
 			}
 			BoundaryPoly->GetPoints()->Modified();
@@ -788,20 +812,97 @@ public:
 				ControlPointCoord->SetTuple(i, newcontrolcoord);
 			}
 		}
-		else if (key == "g")
+
+		else if (key == "Down")
 		{
-			forces.resize(SamplePoly->GetPoints()->GetNumberOfPoints());
-			for (int iter = 0; iter < 20; iter ++)
+			if (ControlPointCoord == NULL)
+				return;
+
+			pushballcenter[2] -= 0.1;
+			double thisballcenter[3] = { 0.0, 0.0, 0.0 };
+			for (int i = 0; i < BoundaryPoly->GetPoints()->GetNumberOfPoints(); i++)
 			{
-				DeformationMotion();
-				connectionCellArray->Modified();
-				connectionPolyData->Modified();
-				SamplePoly->Modified();
-				renderWindow->Render();
+				double boundarycoordi[3];
+				BoundaryPoly->GetPoint(i, boundarycoordi);
+
+				double dis2pushball = sqrt(vtkMath::Distance2BetweenPoints(boundarycoordi, pushballcenter));
+				if (dis2pushball < pushballradius)
+				{
+					double boundarycoordi_yz[2] = { boundarycoordi[0], boundarycoordi[1] };
+					double dis_yz = vtkMath::Norm2D(boundarycoordi_yz);
+					double dis_x = sqrt(pushballradius * pushballradius - dis_yz * dis_yz);
+					boundarycoordi[2] = pushballcenter[2] - dis_x;
+					BoundaryPoly->GetPoints()->SetPoint(i, boundarycoordi);
+
+				}
 			}
-		
-		//	BuildRelationshipsParameters();
-		}	
+			BoundaryPoly->GetPoints()->Modified();
+			BoundaryPoly->Modified();
+			renderWindow->Render();
+
+			BoundaryPolynormalGenerator->Update();
+
+			for (int i = 0; i < ControlPointCoord->GetNumberOfTuples(); i++)
+			{
+				if (isControlPoint->GetValue(i) != 1)
+					continue;
+
+				double newcontrolcoord[3];
+				BoundaryPoly->GetPoint(RelatedBoundaryPids[i], newcontrolcoord);
+				ControlPointCoord->SetTuple(i, newcontrolcoord);
+			}
+		}
+		else if (key == "Up")
+		{
+			if (ControlPointCoord == NULL)
+				return;
+			double pushballcenter_old[3] = { pushballcenter[0], pushballcenter[1], pushballcenter[2] };
+			pushballcenter[2] += 0.1;
+			double thisballcenter[3] = { 0.0, 0.0, 0.0 };
+			for (int i = 0; i < BoundaryPoly->GetPoints()->GetNumberOfPoints(); i++)
+			{
+				double boundarycoordi[3];
+				BoundaryPoly->GetPoint(i, boundarycoordi);
+
+				double dis2pushball_old = sqrt(vtkMath::Distance2BetweenPoints(boundarycoordi, pushballcenter_old));
+				double dis2pushball = sqrt(vtkMath::Distance2BetweenPoints(boundarycoordi, pushballcenter));
+				double dis2thisball = sqrt(vtkMath::Distance2BetweenPoints(boundarycoordi, thisballcenter));
+
+				if (dis2pushball_old < pushballradius + 1e-3 && dis2pushball > pushballradius && dis2thisball < CLRADIUS + 1e-3)
+				{
+
+					double boundarycoordi_yz[2] = { boundarycoordi[0], boundarycoordi[1] };
+					double dis_yz = vtkMath::Norm2D(boundarycoordi_yz);
+					double dis_x = sqrt(pushballradius * pushballradius - dis_yz * dis_yz);
+					boundarycoordi[2] = pushballcenter[2] - dis_x;
+					BoundaryPoly->GetPoints()->SetPoint(i, boundarycoordi);
+				}
+				else
+				{
+				//	double boundarycoordi_yz[2] = { boundarycoordi[0], boundarycoordi[1] };
+				//	double dis_yz = vtkMath::Norm2D(boundarycoordi_yz);
+				//	double dis_x = sqrt(CRADIUS * CRADIUS - dis_yz * dis_yz);
+				//	boundarycoordi[2] = dis_x;
+				//	BoundaryPoly->GetPoints()->SetPoint(i, boundarycoordi);
+				}
+			}
+			BoundaryPoly->GetPoints()->Modified();
+			BoundaryPoly->Modified();
+			renderWindow->Render();
+
+			BoundaryPolynormalGenerator->Update();
+
+			for (int i = 0; i < ControlPointCoord->GetNumberOfTuples(); i++)
+			{
+				if (isControlPoint->GetValue(i) != 1)
+					continue;
+
+				double newcontrolcoord[3];
+				BoundaryPoly->GetPoint(RelatedBoundaryPids[i], newcontrolcoord);
+				ControlPointCoord->SetTuple(i, newcontrolcoord);
+			}
+		}
+
 
 	}
 
@@ -836,6 +937,11 @@ public:
 	
 	vtkPolyData* connectionPolyData;
 	vtkCellArray* connectionCellArray;
+
+	// 
+	double pushballcenter[3];
+	double pushballradius;
+
 };
 vtkStandardNewMacro(MouseInteractorStyle);
 
