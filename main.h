@@ -41,6 +41,9 @@
 #include <vtkFloatArray.h>
 
 
+#include <vtkPointPicker.h>
+
+
 using namespace std;
 
 #define CV_PI 3.141592653

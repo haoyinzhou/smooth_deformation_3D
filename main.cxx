@@ -68,6 +68,7 @@ public:
 		pushballcenter[2] = 9.0;
 		pushballradius = 4.0;
 
+		LeftButtonDown = false;
 	}
 
 	~MouseInteractorStyle(){	}
@@ -677,7 +678,6 @@ public:
 		return true;
 	}
 
-
 	virtual void OnKeyPress()
 	{
 		std::string key = this->Interactor->GetKeySym();
@@ -870,8 +870,119 @@ public:
 
 	}
 
+	bool Pick(double picked[3])
+	{
+		int x = this->Interactor->GetEventPosition()[0];
+		int y = this->Interactor->GetEventPosition()[1];
 
+		if (this->CurrentRenderer == NULL) return false;
 
+		this->Interactor->GetPicker()->Pick(x, y, 0, this->CurrentRenderer);
+		this->Interactor->GetPicker()->GetPickPosition(picked);
+		return true;
+	}
+	
+	virtual void OnLeftButtonDown()
+	{
+		this->Superclass::OnLeftButtonDown();
+
+		if (!BoundaryPoly)
+			return;
+
+		if (this->Pick(lastpickpos))
+		{
+			this->LeftButtonDown = true;
+			this->PickedBoundaryPID = boundarypointLocator->FindClosestPointWithinRadius(4.0, lastpickpos, this->pickdistance);
+		}
+	}
+
+	virtual void OnLeftButtonUp()
+	{
+		this->Superclass::OnLeftButtonUp();
+
+		this->PickedBoundaryPID = -1;
+		this->LeftButtonDown = false;
+	}
+
+	virtual void OnMouseMove()
+	{
+		if (this->Interactor->GetControlKey() == false)
+		{
+			this->Superclass::OnMouseMove();
+			return;
+		}
+
+		if (this->LeftButtonDown == false)
+			return;
+		if (this->PickedBoundaryPID == -1)
+			return;
+
+		vtkFloatArray* BoundaryNormalArray = vtkFloatArray::SafeDownCast(BoundaryPolynormalGenerator->GetOutput()->GetPointData()->GetArray("Normals"));
+		if (BoundaryNormalArray == NULL)
+		{
+			std::cerr << "cannot find BoundaryNormalArray" << std::endl;
+			return;
+		}
+		
+		if (Pick(pickpos))
+		{
+			if (this->pickdistance > 1.0)
+				return;	
+			
+			double move[3];
+			vtkMath::Subtract(pickpos, lastpickpos, move);	
+
+			double boundarynormal[3];
+			BoundaryNormalArray->GetTuple(this->PickedBoundaryPID, boundarynormal);
+			double moveproj = vtkMath::Dot(move, boundarynormal);
+			for (int l = 0; l < 3; l++) move[l] = moveproj * boundarynormal[l];
+			
+			double PickedBoundaryCoord[3];
+			BoundaryPoly->GetPoint(this->PickedBoundaryPID, PickedBoundaryCoord);
+
+			vtkSmartPointer<vtkIdList> NeighorpIds = vtkSmartPointer<vtkIdList>::New();
+			boundarypointLocator->FindPointsWithinRadius(20.0, PickedBoundaryCoord, NeighorpIds);
+
+			for (int idxj = 0; idxj < NeighorpIds->GetNumberOfIds(); idxj++)
+			{
+				vtkIdType j = NeighorpIds->GetId(idxj);
+				double coordj[3];
+				BoundaryPoly->GetPoint(j, coordj);
+				double dis = sqrt(vtkMath::Distance2BetweenPoints(coordj, PickedBoundaryCoord));
+				double w = exp(-0.2 * (dis * dis));
+				double wmove[3];
+				for (int l = 0; l < 3; l++) wmove[l] = w * move[l];
+
+				double boundarynormalj[3];
+				BoundaryNormalArray->GetTuple(j, boundarynormalj);
+				double moveprojj = vtkMath::Dot(wmove, boundarynormalj);
+				for (int l = 0; l < 3; l++) wmove[l] = moveprojj * boundarynormalj[l];
+
+				vtkMath::Add(coordj, wmove, coordj);
+				BoundaryPoly->GetPoints()->SetPoint(j, coordj);
+			}
+
+			BoundaryPoly->GetPoints()->Modified();
+			BoundaryPoly->Modified();
+			renderWindow->Render();
+						
+			for (int idxj = 0; idxj < NeighorpIds->GetNumberOfIds(); idxj++)
+			{
+				vtkIdType j = NeighorpIds->GetId(idxj);
+				for (int i = 0; i < ControlPointCoord->GetNumberOfTuples(); i++)
+				{
+					if (RelatedBoundaryPids[i] != j)
+						continue;
+
+					double newcontrolcoord[3];
+					BoundaryPoly->GetPoint(RelatedBoundaryPids[i], newcontrolcoord);
+					ControlPointCoord->SetTuple(i, newcontrolcoord);
+				}
+			}
+
+			std::swap(lastpickpos, pickpos);
+		}
+	}
 
 public:
 
@@ -909,6 +1020,14 @@ public:
 	double pushballcenter[3];
 	double pushballradius;
 
+	//
+	double pickpos[3];
+	double pickdistance;
+	double lastpickpos[3];
+	vtkIdType PickedBoundaryPID;
+	bool LeftButtonDown;
+	vtkSmartPointer<vtkIntArray> distance2selectedPID;
+
 };
 vtkStandardNewMacro(MouseInteractorStyle);
 
@@ -941,7 +1060,7 @@ int main(int argc, char *argv[])
 	vtkSmartPointer<vtkPointLocator> boundarypointLocator = vtkSmartPointer<vtkPointLocator>::New();
 	boundarypointLocator->SetDataSet(BoundaryPoly);
 	boundarypointLocator->AutomaticOn();
-	boundarypointLocator->SetNumberOfPointsPerBucket(1);
+	boundarypointLocator->SetNumberOfPointsPerBucket(5);
 	boundarypointLocator->BuildLocator();
 	
 	// generate initial SamplePoints
@@ -1020,8 +1139,6 @@ int main(int argc, char *argv[])
 	SamplePoly->GetPointData()->AddArray(F_abssum);
 	SamplePoly->GetPointData()->AddArray(F_sumabs);
 
-	std::cout << "SamplePoints.num = " << SamplePoints->GetNumberOfPoints() << std::endl;
-
 	// 
 	vtkSmartPointer<vtkCellArray> connectionCellArray =	vtkSmartPointer<vtkCellArray>::New();
 	vtkSmartPointer<vtkPolyData> connectionPolyData = vtkSmartPointer<vtkPolyData>::New();
@@ -1043,9 +1160,10 @@ int main(int argc, char *argv[])
 	actor->SetMapper(mapper);
 	actor->GetProperty()->SetColor(1.0, 0.0, 0.0); //(R,G,B)
 	actor->GetProperty()->SetPointSize(5.0);
+	actor->GetProperty()->SetDiffuse(1.0);
 	renderer->AddActor(actor);
 
-	vtkSmartPointer<vtkPolyDataMapper> mapper1 =	vtkSmartPointer<vtkPolyDataMapper>::New();
+	vtkSmartPointer<vtkPolyDataMapper> mapper1 = vtkSmartPointer<vtkPolyDataMapper>::New();
 	mapper1->SetInputData(BoundaryPoly);
 	vtkSmartPointer<vtkActor> actor1 = vtkSmartPointer<vtkActor>::New();
 	actor1->SetMapper(mapper1);
@@ -1053,19 +1171,23 @@ int main(int argc, char *argv[])
 	actor1->GetProperty()->SetOpacity(0.1);
 	renderer->AddActor(actor1);
 
-	vtkSmartPointer<vtkPolyDataMapper> mapper2 =	vtkSmartPointer<vtkPolyDataMapper>::New();
+	vtkSmartPointer<vtkPolyDataMapper> mapper2 = vtkSmartPointer<vtkPolyDataMapper>::New();
 	mapper2->SetInputData(connectionPolyData); 
 	vtkSmartPointer<vtkActor> actor2 = vtkSmartPointer<vtkActor>::New();
 	actor2->SetMapper(mapper2);
 	actor2->GetProperty()->SetColor(0.0, 1.0, 0.0); //(R,G,B)
 //	actor2->GetProperty()->SetOpacity(0.1);
-	renderer->AddActor(actor2);
+//	renderer->AddActor(actor2);
 
 	renderer->SetBackground(1.0, 1.0, 1.0);
 
 	renderer->ResetCamera();
 	renderWindow->Render();
 	renderWindow->SetWindowName("Show Smoothed Points");
+
+	vtkSmartPointer<vtkPointPicker> pointPicker = vtkSmartPointer<vtkPointPicker>::New();
+	pointPicker->SetTolerance(0.001);
+	renderWindowInteractor->SetPicker(pointPicker);
 
 	vtkSmartPointer<MouseInteractorStyle> style = vtkSmartPointer<MouseInteractorStyle>::New();
 	style->BoundaryPoly = BoundaryPoly;
