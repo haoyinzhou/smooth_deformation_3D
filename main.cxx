@@ -134,7 +134,7 @@ public:
 			std::cerr << "cannot find BoundaryNormalArray" << std::endl;
 			return false;
 		}
-
+		
 		for (int iter = 0; iter < iterationnumber; iter++)
 		{
 			for (vtkIdType i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
@@ -214,7 +214,8 @@ public:
 					vtkMath::Normalize(Fi);
 					for (int l = 0; l < 3; l++) Fi[l] = 20.0 * Fi[l];
 				}
-
+				
+				if (isControlPoint->GetValue(i) != 2) // if it is not a J-bar control point
 				{
 					double coordi_new[3];
 					for (int l = 0; l < 3; l++) coordi_new[l] = coordi[l] + Fi[l] / POINTMASS * TIMESTEP;
@@ -354,6 +355,15 @@ public:
 
 		for (vtkIdType i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
 		{
+			if (isControlPoint->GetValue(i) == 2) // if i is a J-bar control point
+			{				
+			//	double tempcoord[3] = { Jbarx, Jbary, Jbarz };
+			//	isControlPoint->SetValue(i, 2);
+			//	ControlPointCoord->SetTuple(i, tempcoord);
+				RelatedBoundaryPids.push_back(-1);
+				continue;
+			}
+
 			double coordi[3];
 			SamplePoly->GetPoint(i, coordi);
 
@@ -363,7 +373,7 @@ public:
 			double dir_p2boundary[3];
 			vtkMath::Subtract(boundarycoord, coordi, dir_p2boundary);
 			double dis_p2boundary = vtkMath::Norm(dir_p2boundary);
-
+			
 			if (dis_p2boundary < 5e-1)
 			{
 				isControlPoint->SetValue(i, 1);
@@ -382,7 +392,7 @@ public:
 		return true;
 	}
 
-	bool DeformationMotion()
+	bool DeformationMotion(int controltag1, int controltag2) // set controltag2 = -1 if not using this parameter
 	{
 		if (this->Connections.size() == 0)
 			return false;
@@ -562,6 +572,10 @@ public:
 					double force_i2pid[3];
 					double force_i2pidnorm = 10 * dis2goal;
 					//force_i2pidnorm = force_i2pidnorm > 10.0 ? 10.0 : force_i2pidnorm;
+
+					if (isControlPoint->GetValue(i) == 2) // Jbar point will have a much larger force to its connections
+						force_i2pidnorm = 20.0 * force_i2pidnorm;
+
 					for (int l = 0; l < 3; l++)	force_i2pid[l] = force_i2pidnorm * dir2goal[l];
 
 					forces[pid].x = forces[pid].x + force_i2pid[0];
@@ -628,7 +642,8 @@ public:
 			for (int i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
 			{
 				// move points according to forces
-				if (isControlPoint->GetValue(i) != 0)
+				if (isControlPoint->GetValue(i) == controltag1
+					|| isControlPoint->GetValue(i) == controltag2)
 				{
 					double GoalCoord[3];
 					ControlPointCoord->GetTuple(i, GoalCoord);
@@ -707,7 +722,7 @@ public:
 			forces.resize(SamplePoly->GetPoints()->GetNumberOfPoints());
 			for (int iter = 0; iter < 20; iter++)
 			{
-				DeformationMotion();
+				DeformationMotion(1, 2);
 				connectionCellArray->Modified();
 				connectionPolyData->Modified();
 				SamplePoly->Modified();
@@ -715,6 +730,43 @@ public:
 			}
 
 			//	BuildRelationshipsParameters();
+		}
+
+		else if (key == "z" || key == "x" || key == "i" || key == "k" || key == "j" || key == "l")
+		{
+			for (int i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
+			{
+				if (isControlPoint->GetValue(i) == 2)
+				{
+					double coordjbar[3];
+					SamplePoly->GetPoint(i, coordjbar);
+					if (key == "z")
+						coordjbar[0] -= 0.1;
+					else if (key == "x")
+						coordjbar[0] += 0.1;
+					else if (key == "i")
+						coordjbar[1] += 0.1;
+					else if (key == "k")
+						coordjbar[1] -= 0.1;
+					else if (key == "j")
+						coordjbar[2] -= 0.1;
+					else if (key == "l")
+						coordjbar[2] += 0.1;						 
+					SamplePoly->GetPoints()->SetPoint(i, coordjbar);
+					ControlPointCoord->SetTuple(i, coordjbar);
+				}
+			}
+
+			forces.resize(SamplePoly->GetPoints()->GetNumberOfPoints());
+			for (int iter = 0; iter < 5; iter++)
+			{
+				DeformationMotion(1, 2);
+			}
+			connectionCellArray->Modified();
+			connectionPolyData->Modified();
+			SamplePoly->Modified();
+			renderWindow->Render();
+
 		}
 
 		else if (key == "Left")
@@ -745,7 +797,6 @@ public:
 				BoundaryPoly->GetPoint(RelatedBoundaryPids[i], newcontrolcoord);
 				ControlPointCoord->SetTuple(i, newcontrolcoord);
 			}
-
 		}
 		else if (key == "Right")
 		{
@@ -1104,6 +1155,14 @@ int main(int argc, char *argv[])
 		i ++;
 	}
 
+	// insert the J-bar 
+	{
+		double coord_jbar[3] = { Jbarx, Jbary, Jbarz };
+		SamplePoints->InsertNextPoint(coord_jbar);
+		isControlPoint->InsertNextValue(2);
+		ControlPointCoord->InsertNextTuple(coord_jbar);
+	}
+
 	vtkSmartPointer<vtkCellArray> SampleCell = vtkSmartPointer<vtkCellArray>::New();
 	for (vtkIdType i = 0; i < SamplePoints->GetNumberOfPoints(); i ++)
 	{
@@ -1112,16 +1171,20 @@ int main(int argc, char *argv[])
 	vtkSmartPointer<vtkPolyData> SamplePoly = vtkSmartPointer<vtkPolyData>::New();
 	SamplePoly->SetPoints(SamplePoints);
 	SamplePoly->SetVerts(SampleCell);
+
+	SamplePoly->GetCellData()->SetScalars(isControlPoint);
+
 //	SavePolyData(SamplePoly, "C:\\work\\smooth_deformation_3D\\testdata\\SamplePoly.vtp");
 	
 	// add color lookup table
 	vtkSmartPointer<vtkLookupTable> lookupTable = vtkSmartPointer<vtkLookupTable>::New();
 	lookupTable->SetNumberOfTableValues(3);
-	lookupTable->Build();
+	lookupTable->SetRange(0.0, 2.0);
+	lookupTable->SetScaleToLinear();
 	lookupTable->SetTableValue(0, 1.0, 0.0, 0.0, 1); 
-	lookupTable->SetTableValue(1, 0.0, 0.0, 0.0, 1); 
-	lookupTable->SetTableValue(2, 1.0, 0.3882, 0.2784, 1); 
-	SamplePoly->GetCellData()->SetScalars(isControlPoint);
+	lookupTable->SetTableValue(1, 0.0, 0.0, 1.0, 1); 
+	lookupTable->SetTableValue(2, 0.0, 1.0, 0.0, 1); 
+	lookupTable->Build();
 
 	vtkSmartPointer<vtkPointLocator> pointLocator = vtkSmartPointer<vtkPointLocator>::New();
 	pointLocator->SetDataSet(SamplePoly);
@@ -1168,6 +1231,7 @@ int main(int argc, char *argv[])
 	renderer->SetViewport(static_cast<double>(0)/1,0,static_cast<double>(0+1)/1,1);
 	vtkSmartPointer<vtkPolyDataMapper> mapper =	vtkSmartPointer<vtkPolyDataMapper>::New();
 	mapper->SetInputData(SamplePoly); 
+	mapper->SetScalarRange(0.0, 2.0);
 	mapper->SetLookupTable(lookupTable);
 	vtkSmartPointer<vtkActor> actor = vtkSmartPointer<vtkActor>::New();
 	actor->SetMapper(mapper);

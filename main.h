@@ -56,6 +56,10 @@ using namespace std;
 #define  Hardness 2.0
 #define POINTMASS 100.0
 #define TIMESTEP 0.2
+#define Jbarx 0.0
+#define Jbary 0.0
+#define Jbarz 0.0
+
 
 const double BorderForce = 1 / (0.75 * 0.75 * 0.75 * 0.75 * 0.75 * 0.75) - 1 / 0.75;
 
