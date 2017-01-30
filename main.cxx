@@ -948,13 +948,17 @@ public:
 				vtkIdType j = NeighorpIds->GetId(idxj);
 				double coordj[3];
 				BoundaryPoly->GetPoint(j, coordj);
+				double boundarynormalj[3];
+				BoundaryNormalArray->GetTuple(j, boundarynormalj);
+
+				if (vtkMath::Dot(boundarynormal, boundarynormalj) < 0.0) 
+					continue;
+
 				double dis = sqrt(vtkMath::Distance2BetweenPoints(coordj, PickedBoundaryCoord));
 				double w = exp(-0.2 * (dis * dis));
 				double wmove[3];
 				for (int l = 0; l < 3; l++) wmove[l] = w * move[l];
 
-				double boundarynormalj[3];
-				BoundaryNormalArray->GetTuple(j, boundarynormalj);
 				double moveprojj = vtkMath::Dot(wmove, boundarynormalj);
 				for (int l = 0; l < 3; l++) wmove[l] = moveprojj * boundarynormalj[l];
 
@@ -1056,7 +1060,6 @@ int main(int argc, char *argv[])
 		return false;
 	}
 
-
 	vtkSmartPointer<vtkPointLocator> boundarypointLocator = vtkSmartPointer<vtkPointLocator>::New();
 	boundarypointLocator->SetDataSet(BoundaryPoly);
 	boundarypointLocator->AutomaticOn();
@@ -1110,6 +1113,15 @@ int main(int argc, char *argv[])
 	SamplePoly->SetPoints(SamplePoints);
 	SamplePoly->SetVerts(SampleCell);
 //	SavePolyData(SamplePoly, "C:\\work\\smooth_deformation_3D\\testdata\\SamplePoly.vtp");
+	
+	// add color lookup table
+	vtkSmartPointer<vtkLookupTable> lookupTable = vtkSmartPointer<vtkLookupTable>::New();
+	lookupTable->SetNumberOfTableValues(3);
+	lookupTable->Build();
+	lookupTable->SetTableValue(0, 1.0, 0.0, 0.0, 1); 
+	lookupTable->SetTableValue(1, 0.0, 0.0, 0.0, 1); 
+	lookupTable->SetTableValue(2, 1.0, 0.3882, 0.2784, 1); 
+	SamplePoly->GetCellData()->SetScalars(isControlPoint);
 
 	vtkSmartPointer<vtkPointLocator> pointLocator = vtkSmartPointer<vtkPointLocator>::New();
 	pointLocator->SetDataSet(SamplePoly);
@@ -1156,11 +1168,12 @@ int main(int argc, char *argv[])
 	renderer->SetViewport(static_cast<double>(0)/1,0,static_cast<double>(0+1)/1,1);
 	vtkSmartPointer<vtkPolyDataMapper> mapper =	vtkSmartPointer<vtkPolyDataMapper>::New();
 	mapper->SetInputData(SamplePoly); 
+	mapper->SetLookupTable(lookupTable);
 	vtkSmartPointer<vtkActor> actor = vtkSmartPointer<vtkActor>::New();
 	actor->SetMapper(mapper);
 	actor->GetProperty()->SetColor(1.0, 0.0, 0.0); //(R,G,B)
 	actor->GetProperty()->SetPointSize(5.0);
-	actor->GetProperty()->SetDiffuse(1.0);
+
 	renderer->AddActor(actor);
 
 	vtkSmartPointer<vtkPolyDataMapper> mapper1 = vtkSmartPointer<vtkPolyDataMapper>::New();
@@ -1168,7 +1181,9 @@ int main(int argc, char *argv[])
 	vtkSmartPointer<vtkActor> actor1 = vtkSmartPointer<vtkActor>::New();
 	actor1->SetMapper(mapper1);
 	actor1->GetProperty()->SetColor(0.0, 0.0, 1.0); //(R,G,B)
-	actor1->GetProperty()->SetOpacity(0.1);
+	actor1->GetProperty()->SetOpacity(0.10);
+	actor1->GetProperty()->SetDiffuse(1);
+	actor1->GetProperty()->SetSpecular(1);
 	renderer->AddActor(actor1);
 
 	vtkSmartPointer<vtkPolyDataMapper> mapper2 = vtkSmartPointer<vtkPolyDataMapper>::New();
@@ -1176,10 +1191,11 @@ int main(int argc, char *argv[])
 	vtkSmartPointer<vtkActor> actor2 = vtkSmartPointer<vtkActor>::New();
 	actor2->SetMapper(mapper2);
 	actor2->GetProperty()->SetColor(0.0, 1.0, 0.0); //(R,G,B)
-//	actor2->GetProperty()->SetOpacity(0.1);
+//	actor2->GetProperty()->SetOpacity(0.5);
 //	renderer->AddActor(actor2);
 
 	renderer->SetBackground(1.0, 1.0, 1.0);
+	renderer->SetAutomaticLightCreation(1);
 
 	renderer->ResetCamera();
 	renderWindow->Render();
