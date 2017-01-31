@@ -497,8 +497,11 @@ public:
 					vtkMath::Normalize(dir2goal);
 
 					double force_i2pid[3];
-					double force_i2pidnorm = 20 * dis2goal;
+					double force_i2pidnorm = 5.0 * dis2goal * dis2goal;
 					//force_i2pidnorm = force_i2pidnorm > 10.0 ? 10.0 : force_i2pidnorm;
+
+					if (isControlPoint->GetValue(i) == 1) // Surface point will have a much larger force to its connections
+						force_i2pidnorm = 5.0 * force_i2pidnorm;
 
 					if (isControlPoint->GetValue(i) == 2) // Jbar point will have a much larger force to its connections
 						force_i2pidnorm = 20.0 * force_i2pidnorm;
@@ -583,7 +586,7 @@ public:
 					vtkMath::Normalize(dir2goal);
 
 					double Fi[3];
-					double force_i2pidnorm = 20 * dis2goal;
+					double force_i2pidnorm = 50 * dis2goal;
 					force_i2pidnorm = force_i2pidnorm > 50.0 ? 50.0 : force_i2pidnorm;
 					for (int l = 0; l < 3; l++)	Fi[l] = force_i2pidnorm * dir2goal[l];
 
@@ -598,10 +601,10 @@ public:
 					Fi[1] = forces[i].y;
 					Fi[2] = forces[i].z;
 
-					if (vtkMath::Norm(Fi) > 30.0)
+					if (vtkMath::Norm(Fi) > 50.0)
 					{
 						vtkMath::Normalize(Fi);
-						vtkMath::MultiplyScalar(Fi, 30.0);
+						vtkMath::MultiplyScalar(Fi, 50.0);
 					}
 
 					double coordi[3];
@@ -622,7 +625,7 @@ public:
 
 	bool CubeRedistributionandBuildConnections()
 	{
-		const double cubestep = 0.8;
+		const double cubestep = 1.0;
 
 		vtkSmartPointer<vtkPoints> SamplePoints = SamplePoly->GetPoints(); // vtkSmartPointer<vtkPoints>::New();
 		vtkSmartPointer<vtkIdTypeArray> xyzindex = vtkSmartPointer<vtkIdTypeArray>::New();
@@ -648,12 +651,14 @@ public:
 						isControlPoint->SetValue(idx, 1);
 						double coordtemp[3] = { x, y, z };
 						ControlPointCoord->SetTuple(idx, coordtemp);
+						R->SetValue(idx, cubestep);
 					}
 					else
 					{
 						isControlPoint->SetValue(idx, 0);
 						double coordtemp[3] = { 0.0, 0.0, 0.0 };
 						ControlPointCoord->SetTuple(idx, coordtemp);
+						R->SetValue(idx, cubestep);
 					}
 
 					idx++;
@@ -666,7 +671,7 @@ public:
 
 		for (vtkIdType i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
 		{
-			double* xyzidx = xyzindex->GetTuple3(i);
+		/*	double* xyzidx = xyzindex->GetTuple3(i);
 			vtkIdType xi = xyzidx[0];
 			vtkIdType yi = xyzidx[1];
 			vtkIdType zi = xyzidx[2];
@@ -705,6 +710,37 @@ public:
 				vtkIdType neighorhoodpid = (xi)* DPts * DPts + (yi)* DPts + zi + 1;
 				Connection_i.push_back(neighorhoodpid);
 			}
+		*/
+			
+			double coordi[3];
+			SamplePoly->GetPoints()->GetPoint(i, coordi);
+			double Ri = R->GetValue(i);
+
+			vtkSmartPointer<vtkIdList> NeighorpIds = vtkSmartPointer<vtkIdList>::New();
+			//pointLocator->FindPointsWithinRadius(4.0, coordi, NeighorpIds);
+			pointLocator->FindClosestNPoints(20, coordi, NeighorpIds);
+
+			vector<vtkIdType> Connection_i;
+
+			for (int idxj = 0; idxj < NeighorpIds->GetNumberOfIds(); idxj++)
+			{
+				vtkIdType j = NeighorpIds->GetId(idxj);
+				if (i == j) continue;
+
+				double coordj[3];
+				SamplePoly->GetPoints()->GetPoint(j, coordj);
+
+				double dir[3];
+				vtkMath::Subtract(coordi, coordj, dir);
+				double dis = vtkMath::Norm(dir);
+
+				double Rj = R->GetValue(j);
+				double R_total = Ri + Rj;
+
+				if (dis < 1.0 * R_total)
+					Connection_i.push_back(j);
+			}
+			
 			this->Connections.push_back(Connection_i);
 		}
 
@@ -1140,7 +1176,7 @@ public:
 				std::swap(lastpickpos, pickpos);
 
 				forces.resize(SamplePoly->GetPoints()->GetNumberOfPoints());
-				for (int iter = 0; iter < 1; iter++)
+				for (int iter = 0; iter < 10; iter++)
 				{
 					DeformationMotion(1, 2);
 				}
@@ -1276,7 +1312,7 @@ int main(int argc, char *argv[])
 */
 
 	// add cube points
-	const double cubestep = 0.8;
+	const double cubestep = 1.0;
 	int DPts = int(2.0 * CRADIUS / cubestep + 1);
 	for (vtkIdType xidx = 0; xidx < DPts; xidx++)
 		for (vtkIdType yidx = 0; yidx < DPts; yidx++)
@@ -1372,7 +1408,7 @@ int main(int argc, char *argv[])
 	vtkSmartPointer<vtkActor> actor = vtkSmartPointer<vtkActor>::New();
 	actor->SetMapper(mapper);
 	actor->GetProperty()->SetColor(1.0, 0.0, 0.0); //(R,G,B)
-	actor->GetProperty()->SetPointSize(5.0);
+	actor->GetProperty()->SetPointSize(6.0);
 
 	renderer->AddActor(actor);
 
@@ -1391,6 +1427,7 @@ int main(int argc, char *argv[])
 	vtkSmartPointer<vtkActor> actor2 = vtkSmartPointer<vtkActor>::New();
 	actor2->SetMapper(mapper2);
 	actor2->GetProperty()->SetColor(0.0, 1.0, 0.0); //(R,G,B)
+	actor2->GetProperty()->SetLineWidth(0.5);
 //	actor2->GetProperty()->SetOpacity(0.5);
 	renderer->AddActor(actor2);
 
