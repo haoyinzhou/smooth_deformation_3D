@@ -43,6 +43,7 @@
 
 #include <vtkPointPicker.h>
 #include <vtkLookupTable.h>
+#include <vtkCubeSource.h>
 
 
 using namespace std;
