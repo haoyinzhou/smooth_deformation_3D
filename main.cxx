@@ -625,7 +625,7 @@ public:
 
 	bool CubeRedistributionandBuildConnections()
 	{
-		const double cubestep = 1.0;
+		const double cubestep = CUBESTEP;
 
 		vtkSmartPointer<vtkPoints> SamplePoints = SamplePoly->GetPoints(); // vtkSmartPointer<vtkPoints>::New();
 		vtkSmartPointer<vtkIdTypeArray> xyzindex = vtkSmartPointer<vtkIdTypeArray>::New();
@@ -668,6 +668,7 @@ public:
 		// build connections
 		this->Connections.clear();
 		connectionCellArray->Reset();
+		isSurfaceConnections->Reset();
 
 		for (vtkIdType i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
 		{
@@ -737,7 +738,7 @@ public:
 				double Rj = R->GetValue(j);
 				double R_total = Ri + Rj;
 
-				if (dis < 1.0 * R_total)
+				if (dis < 0.9 * R_total)
 					Connection_i.push_back(j);
 			}
 			
@@ -756,8 +757,15 @@ public:
 				line->GetPointIds()->SetId(0, i);
 				line->GetPointIds()->SetId(1, j);
 				connectionCellArray->InsertNextCell(line);
+
+				if (isControlPoint->GetValue(i) == 1 && isControlPoint->GetValue(j) == 1)
+					isSurfaceConnections->InsertNextValue(1);
+				else
+					isSurfaceConnections->InsertNextValue(0);
+
 			}
 		}
+
 		return true;
 	}
 
@@ -800,14 +808,22 @@ public:
 		else if (key == "g")
 		{
 			forces.resize(SamplePoly->GetPoints()->GetNumberOfPoints());
-			for (int iter = 0; iter < 20; iter++)
+			for (int iter = 0; iter < 5; iter++)
 			{
 				DeformationMotion(1, 2);
-				connectionCellArray->Modified();
-				connectionPolyData->Modified();
-				SamplePoly->Modified();
-				renderWindow->Render();
 			}
+
+			const double cubestep = CUBESTEP;
+			int DPts = int(2.0 * CRADIUS / cubestep + 1);
+			double TuberCenterCoord[3];
+			SamplePoly->GetPoint(TumorCenterIdx[0] * DPts * DPts + TumorCenterIdx[1] * DPts + TumorCenterIdx[2], TuberCenterCoord);
+			TumorSphereSource->SetCenter(TuberCenterCoord);
+			TumorSphereSource->Update();
+
+			connectionCellArray->Modified();
+			connectionPolyData->Modified();
+			SamplePoly->Modified();
+			renderWindow->Render();
 
 			//	BuildRelationshipsParameters();
 		}
@@ -909,96 +925,67 @@ public:
 			}
 		}
 
-/*		else if (key == "Down")
+		else if (key == "Down" || key == "Up")
 		{
-			if (ControlPointCoord == NULL)
-				return;
+			const double cubestep = CUBESTEP;
+			int DPts = int(2.0 * CRADIUS / cubestep + 1);
 
-			pushballcenter[2] -= 0.1;
-			double thisballcenter[3] = { 0.0, 0.0, 0.0 };
-			for (int i = 0; i < BoundaryPoly->GetPoints()->GetNumberOfPoints(); i++)
+			vtkIdType xidx = 0.5 * DPts;
+			vtkIdType yidx = 0.5 * DPts;
+			vtkIdType zidx = 0;
+			vtkIdType idx = xidx * DPts * DPts + yidx * DPts + zidx;
+			
+			double PickedSampleCoord[3];
+			double move[3] = {0.0, 0.0, 0.0};
+			if (key == "Down")
+				move[2] = -0.05;
+			else
+				move[2] = 0.05;
+
+			SamplePoly->GetPoint(idx, PickedSampleCoord);
+
+			vtkSmartPointer<vtkIdList> NeighorpIds = vtkSmartPointer<vtkIdList>::New();
+			pointLocator->FindPointsWithinRadius(20.0, PickedSampleCoord, NeighorpIds);
+
+			for (int idxj = 0; idxj < NeighorpIds->GetNumberOfIds(); idxj++)
 			{
-				double boundarycoordi[3];
-				BoundaryPoly->GetPoint(i, boundarycoordi);
+				vtkIdType j = NeighorpIds->GetId(idxj);
+				if (isControlPoint->GetValue(j) == 0) continue;
 
-				double dis2pushball = sqrt(vtkMath::Distance2BetweenPoints(boundarycoordi, pushballcenter));
-				if (dis2pushball < pushballradius)
-				{
-					double boundarycoordi_yz[2] = { boundarycoordi[0], boundarycoordi[1] };
-					double dis_yz = vtkMath::Norm2D(boundarycoordi_yz);
-					double dis_x = sqrt(pushballradius * pushballradius - dis_yz * dis_yz);
-					boundarycoordi[2] = pushballcenter[2] - dis_x;
-					BoundaryPoly->GetPoints()->SetPoint(i, boundarycoordi);
+				double coordj[3];
+				SamplePoly->GetPoint(j, coordj);
 
-				}
+				double dis = sqrt(vtkMath::Distance2BetweenPoints(coordj, PickedSampleCoord));
+				double w = exp(-0.2 * (dis * dis));
+				double wmove[3];
+				for (int l = 0; l < 3; l++) wmove[l] = w * move[l];
+
+				vtkMath::Add(coordj, wmove, coordj);
+				SamplePoly->GetPoints()->SetPoint(j, coordj);
+
+				ControlPointCoord->SetTuple(j, coordj);
 			}
-			BoundaryPoly->GetPoints()->Modified();
-			BoundaryPoly->Modified();
+
+			std::swap(lastpickpos, pickpos);
+
+			forces.resize(SamplePoly->GetPoints()->GetNumberOfPoints());
+			for (int iter = 0; iter < 1; iter++)
+			{
+				DeformationMotion(1, 2);
+			}
+
+			double TuberCenterCoord[3];
+			SamplePoly->GetPoint(TumorCenterIdx[0] * DPts * DPts + TumorCenterIdx[1] * DPts + TumorCenterIdx[2], TuberCenterCoord);
+			TumorSphereSource->SetCenter(TuberCenterCoord);
+			TumorSphereSource->Update();
+
+			connectionCellArray->Modified();
+			connectionPolyData->Modified();
+			SamplePoly->Modified();
 			renderWindow->Render();
 
-			BoundaryPolynormalGenerator->Update();
-
-			for (int i = 0; i < ControlPointCoord->GetNumberOfTuples(); i++)
-			{
-				if (isControlPoint->GetValue(i) != 1)
-					continue;
-
-				double newcontrolcoord[3];
-				BoundaryPoly->GetPoint(RelatedBoundaryPids[i], newcontrolcoord);
-				ControlPointCoord->SetTuple(i, newcontrolcoord);
-			}
 		}
-		else if (key == "Up")
-		{
-			if (ControlPointCoord == NULL)
-				return;
-			double pushballcenter_old[3] = { pushballcenter[0], pushballcenter[1], pushballcenter[2] };
-			pushballcenter[2] += 0.1;
-			double thisballcenter[3] = { 0.0, 0.0, 0.0 };
-			for (int i = 0; i < BoundaryPoly->GetPoints()->GetNumberOfPoints(); i++)
-			{
-				double boundarycoordi[3];
-				BoundaryPoly->GetPoint(i, boundarycoordi);
 
-				double dis2pushball_old = sqrt(vtkMath::Distance2BetweenPoints(boundarycoordi, pushballcenter_old));
-				double dis2pushball = sqrt(vtkMath::Distance2BetweenPoints(boundarycoordi, pushballcenter));
-				double dis2thisball = sqrt(vtkMath::Distance2BetweenPoints(boundarycoordi, thisballcenter));
-
-				if (dis2pushball_old < pushballradius + 1e-3 && dis2pushball > pushballradius && dis2thisball < CLRADIUS + 1e-3)
-				{
-
-					double boundarycoordi_yz[2] = { boundarycoordi[0], boundarycoordi[1] };
-					double dis_yz = vtkMath::Norm2D(boundarycoordi_yz);
-					double dis_x = sqrt(pushballradius * pushballradius - dis_yz * dis_yz);
-					boundarycoordi[2] = pushballcenter[2] - dis_x;
-					BoundaryPoly->GetPoints()->SetPoint(i, boundarycoordi);
-				}
-				else
-				{
-				//	double boundarycoordi_yz[2] = { boundarycoordi[0], boundarycoordi[1] };
-				//	double dis_yz = vtkMath::Norm2D(boundarycoordi_yz);
-				//	double dis_x = sqrt(CRADIUS * CRADIUS - dis_yz * dis_yz);
-				//	boundarycoordi[2] = dis_x;
-				//	BoundaryPoly->GetPoints()->SetPoint(i, boundarycoordi);
-				}
-			}
-			BoundaryPoly->GetPoints()->Modified();
-			BoundaryPoly->Modified();
-			renderWindow->Render();
-
-			BoundaryPolynormalGenerator->Update();
-
-			for (int i = 0; i < ControlPointCoord->GetNumberOfTuples(); i++)
-			{
-				if (isControlPoint->GetValue(i) != 1)
-					continue;
-
-				double newcontrolcoord[3];
-				BoundaryPoly->GetPoint(RelatedBoundaryPids[i], newcontrolcoord);
-				ControlPointCoord->SetTuple(i, newcontrolcoord);
-			}
-		}
-*/
 
 	}
 
@@ -1025,7 +1012,7 @@ public:
 		{
 			this->LeftButtonDown = true;
 			this->PickedBoundaryPID = boundarypointLocator->FindClosestPointWithinRadius(4.0, lastpickpos, this->pickboundarydistance);
-			this->PickedSamplePID = pointLocator->FindClosestPointWithinRadius(4.0, lastpickpos, this->picksampledistance);
+			this->PickedSamplePID = pointLocator->FindClosestPointWithinRadius(1.0, lastpickpos, this->picksampledistance);
 		}
 	}
 
@@ -1049,7 +1036,6 @@ public:
 
 		if (this->LeftButtonDown == false)
 			return;
-
 
 		if (this->Interactor->GetControlKey() == true)
 		{
@@ -1169,10 +1155,6 @@ public:
 					ControlPointCoord->SetTuple(j, coordj);
 				}
 
-				SamplePoly->GetPoints()->Modified();
-				SamplePoly->Modified();
-				renderWindow->Render();
-
 				std::swap(lastpickpos, pickpos);
 
 				forces.resize(SamplePoly->GetPoints()->GetNumberOfPoints());
@@ -1186,7 +1168,6 @@ public:
 				renderWindow->Render();
 			}
 		}
-
 
 	}
 
@@ -1221,6 +1202,7 @@ public:
 	
 	vtkPolyData* connectionPolyData;
 	vtkCellArray* connectionCellArray;
+	vtkIdTypeArray* isSurfaceConnections;
 
 	// 
 	double pushballcenter[3];
@@ -1237,6 +1219,9 @@ public:
 
 	double picksampledistance;
 	vtkIdType PickedSamplePID;
+
+	vtkSphereSource* TumorSphereSource;;
+	vtkIdType TumorCenterIdx[3];
 
 };
 vtkStandardNewMacro(MouseInteractorStyle);
@@ -1312,7 +1297,7 @@ int main(int argc, char *argv[])
 */
 
 	// add cube points
-	const double cubestep = 1.0;
+	const double cubestep = CUBESTEP;
 	int DPts = int(2.0 * CRADIUS / cubestep + 1);
 	for (vtkIdType xidx = 0; xidx < DPts; xidx++)
 		for (vtkIdType yidx = 0; yidx < DPts; yidx++)
@@ -1345,11 +1330,11 @@ int main(int argc, char *argv[])
 	SamplePoly->SetPoints(SamplePoints);
 	SamplePoly->SetVerts(SampleCell);
 
-	SamplePoly->GetCellData()->SetScalars(isControlPoint);
 
 //	SavePolyData(SamplePoly, "C:\\work\\smooth_deformation_3D\\testdata\\SamplePoly.vtp");
 	
 	// add color lookup table
+	SamplePoly->GetCellData()->SetScalars(isControlPoint);
 	vtkSmartPointer<vtkLookupTable> lookupTable = vtkSmartPointer<vtkLookupTable>::New();
 	lookupTable->SetNumberOfTableValues(3);
 	lookupTable->SetRange(0.0, 2.0);
@@ -1358,6 +1343,7 @@ int main(int argc, char *argv[])
 	lookupTable->SetTableValue(1, 0.0, 0.0, 1.0, 1); 
 	lookupTable->SetTableValue(2, 0.0, 1.0, 0.0, 1); 
 	lookupTable->Build();
+
 
 	vtkSmartPointer<vtkPointLocator> pointLocator = vtkSmartPointer<vtkPointLocator>::New();
 	pointLocator->SetDataSet(SamplePoly);
@@ -1391,7 +1377,19 @@ int main(int argc, char *argv[])
 	vtkSmartPointer<vtkPolyData> connectionPolyData = vtkSmartPointer<vtkPolyData>::New();
 	connectionPolyData->SetPoints(SamplePoints);
 	connectionPolyData->SetLines(connectionCellArray);
-		
+	vtkSmartPointer<vtkIdTypeArray> isSurfaceConnections = vtkSmartPointer<vtkIdTypeArray>::New();
+	connectionPolyData->GetCellData()->SetScalars(isSurfaceConnections);
+
+	// add connections color lookup table
+	vtkSmartPointer<vtkLookupTable> connectionslookupTable = vtkSmartPointer<vtkLookupTable>::New();
+	connectionslookupTable->SetNumberOfTableValues(2);
+	connectionslookupTable->SetRange(0.0, 1.0);
+	connectionslookupTable->SetScaleToLinear();
+	connectionslookupTable->SetTableValue(0, 1.0, 0.0, 0.0, 1);
+	connectionslookupTable->SetTableValue(1, 0.0, 0.0, 1.0, 1);
+	connectionslookupTable->Build();
+
+
 	// Render window
 	vtkSmartPointer<vtkRenderWindow> renderWindow =	vtkSmartPointer<vtkRenderWindow>::New();
 	renderWindow->SetSize(200* 1,200); //(width, height)
@@ -1403,8 +1401,8 @@ int main(int argc, char *argv[])
 	renderer->SetViewport(static_cast<double>(0)/1,0,static_cast<double>(0+1)/1,1);
 	vtkSmartPointer<vtkPolyDataMapper> mapper =	vtkSmartPointer<vtkPolyDataMapper>::New();
 	mapper->SetInputData(SamplePoly); 
-//	mapper->SetScalarRange(0.0, 2.0);
-//	mapper->SetLookupTable(lookupTable);
+	mapper->SetScalarRange(0.0, 2.0);
+	mapper->SetLookupTable(lookupTable);
 	vtkSmartPointer<vtkActor> actor = vtkSmartPointer<vtkActor>::New();
 	actor->SetMapper(mapper);
 	actor->GetProperty()->SetColor(1.0, 0.0, 0.0); //(R,G,B)
@@ -1423,13 +1421,36 @@ int main(int argc, char *argv[])
 	//renderer->AddActor(actor1);
 
 	vtkSmartPointer<vtkPolyDataMapper> mapper2 = vtkSmartPointer<vtkPolyDataMapper>::New(); // the connections
-	mapper2->SetInputData(connectionPolyData); 
+	mapper2->SetInputData(connectionPolyData);
+	mapper2->SetScalarRange(0.0, 1.0);
+	mapper2->SetLookupTable(connectionslookupTable);
 	vtkSmartPointer<vtkActor> actor2 = vtkSmartPointer<vtkActor>::New();
 	actor2->SetMapper(mapper2);
 	actor2->GetProperty()->SetColor(0.0, 1.0, 0.0); //(R,G,B)
 	actor2->GetProperty()->SetLineWidth(0.5);
 //	actor2->GetProperty()->SetOpacity(0.5);
 	renderer->AddActor(actor2);
+
+
+	// insert a sphere to represent the tumor
+	vtkSmartPointer<vtkSphereSource> TumorSphereSource = vtkSmartPointer<vtkSphereSource>::New();
+	vtkIdType TumorCenterIdx[3] = { 0.4 * DPts, 0.5 * DPts, 0.15 * DPts };
+	double TuberCenterCoord[3];
+	SamplePoly->GetPoint(TumorCenterIdx[0] * DPts * DPts + TumorCenterIdx[1] * DPts + TumorCenterIdx[2], TuberCenterCoord);
+	TumorSphereSource->SetCenter(TuberCenterCoord);
+	TumorSphereSource->SetRadius(0.5);
+	TumorSphereSource->SetPhiResolution(12);
+	TumorSphereSource->SetThetaResolution(12);
+	TumorSphereSource->Update();
+
+	vtkSmartPointer<vtkPolyDataMapper> mapper_tumor = vtkSmartPointer<vtkPolyDataMapper>::New(); // the tumor sphere
+	mapper_tumor->SetInputConnection(TumorSphereSource->GetOutputPort());
+	vtkSmartPointer<vtkActor> actor_tumor = vtkSmartPointer<vtkActor>::New();
+	actor_tumor->SetMapper(mapper_tumor);
+	actor_tumor->GetProperty()->SetColor(0.0, 1.0, 0.0); //(R,G,B)
+	//	actor2->GetProperty()->SetOpacity(0.5);
+	renderer->AddActor(actor_tumor);
+
 
 	renderer->SetBackground(1.0, 1.0, 1.0);
 	renderer->SetAutomaticLightCreation(1);
@@ -1456,9 +1477,14 @@ int main(int argc, char *argv[])
 
 	style->connectionPolyData = connectionPolyData;
 	style->connectionCellArray = connectionCellArray;
+	style->isSurfaceConnections = isSurfaceConnections;
 	
 	style->isControlPoint = isControlPoint;
 	style->ControlPointCoord = ControlPointCoord;
+
+	style->TumorSphereSource = TumorSphereSource;
+	for (int l = 0; l < 3; l ++) style->TumorCenterIdx[l] = TumorCenterIdx[l];
+
 
 	style->renderWindow = renderWindow;
 	style->ClickCount = 0;
@@ -1675,50 +1701,6 @@ int smoothvtkpolydata(vtkPolyData* Poly, int iternum, int TYPE)
 	return 1;
 }
 
-int BuildConnectionMap(vtkPoints* points_in, vtkPointLocator* pointLocator, double suggestdirs[4][3])
-{
-	vector< vector<vtkIdType> > connectionmap (points_in->GetNumberOfPoints());
-	
-	for (int i = 0; i < points_in->GetNumberOfPoints(); i ++)
-	{
-		double coordi[3];
-		points_in->GetPoint(i, coordi);
-
-		vtkSmartPointer<vtkIdList> NeighorpIds = vtkSmartPointer<vtkIdList>::New(); 
-		pointLocator->FindClosestNPoints(20, coordi, NeighorpIds);
-
-		for (int idxj = 0; idxj < NeighorpIds->GetNumberOfIds(); idxj ++)
-		{
-			vtkIdType j = NeighorpIds->GetId(idxj);
-			if (i == j) continue;
-
-			double coordj[3];
-			points_in->GetPoint(j, coordj);
-
-			double dir[3];
-			vtkMath::Subtract(coordj, coordi, dir);
-			double dis = vtkMath::Norm(dir);
-			vtkMath::Normalize(dir);
-
-			int thissuggetid;
-			double thissuggestdir[3];
-			FINDMAXDIR(suggestdirs, dir, thissuggetid, thissuggestdir);
-			 
-			double angle = vtkMath::Dot(dir, thissuggestdir);
-			if (angle < 0.85) continue;
-
-			// score from dis and angle, if dis smaller angle larger, then score higher
-			double scorej = -exp(0.1 * dis) + exp(1.0 * angle);
-
-			
-
-			
-		}
-
-	}
-	
-	return 1;
-}
 
 
 

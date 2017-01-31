@@ -60,7 +60,7 @@ using namespace std;
 #define Jbarx 0.0
 #define Jbary 0.0
 #define Jbarz 0.0
-
+#define CUBESTEP 1.0
 
 const double BorderForce = 1 / (0.75 * 0.75 * 0.75 * 0.75 * 0.75 * 0.75) - 1 / 0.75;
 
