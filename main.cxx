@@ -644,9 +644,17 @@ public:
 
 					xyzindex->InsertNextTuple3(xidx, yidx, zidx);
 
-					if (xidx == 0 || xidx == DPts - 1
-						|| yidx == 0 || yidx == DPts - 1
-						|| zidx == 0 || zidx == DPts - 1)
+					//if (xidx == 0 || xidx == DPts - 1
+					//	|| yidx == 0 || yidx == DPts - 1
+					//	|| zidx == 0 || zidx == DPts - 1)
+					if (zidx == DPts - 1)
+					{
+						isControlPoint->SetValue(idx, 1);
+						double coordtemp[3] = { x, y, z };
+						ControlPointCoord->SetTuple(idx, coordtemp);
+						R->SetValue(idx, cubestep);
+					}
+					else if (xidx == int(0.5 * DPts) && yidx == int(0.5 * DPts) && zidx == 0)
 					{
 						isControlPoint->SetValue(idx, 1);
 						double coordtemp[3] = { x, y, z };
@@ -748,11 +756,23 @@ public:
 		// build connectionCellArray for display
 		for (vtkIdType i = 0; i < SamplePoly->GetPoints()->GetNumberOfPoints(); i++)
 		{
+			double* xyzidx = xyzindex->GetTuple3(i);
+			double zi = xyzidx[2];
+			//std::cout << i << ", " << xyzidxi[0] << ", " << xyzidxi[1] << ", " << xyzidxi[2] << std::endl;
+
 			for (unsigned int idj = 0; idj < this->Connections[i].size(); idj++)
 			{
 				vtkIdType j = this->Connections[i].at(idj);
 						
 				if (j <= i)	continue;
+
+				xyzidx = xyzindex->GetTuple3(j);
+				double zj = xyzidx[2];
+				if (int(zi) != int(zj))
+				{
+					continue;
+				}
+
 				vtkSmartPointer<vtkLine> line = vtkSmartPointer<vtkLine>::New();
 				line->GetPointIds()->SetId(0, i);
 				line->GetPointIds()->SetId(1, j);
@@ -796,6 +816,13 @@ public:
 		{
 			if (CubeRedistributionandBuildConnections())
 			{
+				const double cubestep = CUBESTEP;
+				int DPts = int(2.0 * CRADIUS / cubestep + 1);
+				double TuberCenterCoord[3];
+				SamplePoly->GetPoint(TumorCenterIdx[0] * DPts * DPts + TumorCenterIdx[1] * DPts + TumorCenterIdx[2], TuberCenterCoord);
+				TumorSphereSource->SetCenter(TuberCenterCoord);
+				TumorSphereSource->Update();
+
 				SamplePoly->Modified();
 				connectionCellArray->Modified();
 				connectionPolyData->Modified();
@@ -866,7 +893,7 @@ public:
 
 		}
 
-		else if (key == "Left")
+		else if (key == "Left" || key == "Right")
 		{
 			if (ControlPointCoord == NULL)
 				return;
@@ -875,37 +902,16 @@ public:
 			{
 				double boundarycoordi[3];
 				BoundaryPoly->GetPoint(i, boundarycoordi);
-				for (int l = 0; l < 1; l++)
-					boundarycoordi[l] = 0.95 * boundarycoordi[l];
-				BoundaryPoly->GetPoints()->SetPoint(i, boundarycoordi);
-			}
-			BoundaryPoly->GetPoints()->Modified();
-			BoundaryPoly->Modified();
-			renderWindow->Render();
-
-			BoundaryPolynormalGenerator->Update();
-
-			for (int i = 0; i < ControlPointCoord->GetNumberOfTuples(); i++)
-			{
-				if (isControlPoint->GetValue(i) != 1)
-					continue;
-
-				double newcontrolcoord[3];
-				BoundaryPoly->GetPoint(RelatedBoundaryPids[i], newcontrolcoord);
-				ControlPointCoord->SetTuple(i, newcontrolcoord);
-			}
-		}
-		else if (key == "Right")
-		{
-			if (ControlPointCoord == NULL)
-				return;
-
-			for (int i = 0; i < BoundaryPoly->GetPoints()->GetNumberOfPoints(); i++)
-			{
-				double boundarycoordi[3];
-				BoundaryPoly->GetPoint(i, boundarycoordi);
-				for (int l = 0; l < 1; l++)
-					boundarycoordi[l] = 1.05 * boundarycoordi[l];
+				if (key == "Left")
+				{
+					for (int l = 0; l < 1; l++)
+						boundarycoordi[l] = 0.95 * boundarycoordi[l];
+				}
+				else
+				{
+					for (int l = 0; l < 1; l++)
+						boundarycoordi[l] = 1.05 * boundarycoordi[l];
+				}
 				BoundaryPoly->GetPoints()->SetPoint(i, boundarycoordi);
 			}
 			BoundaryPoly->GetPoints()->Modified();
@@ -938,9 +944,9 @@ public:
 			double PickedSampleCoord[3];
 			double move[3] = {0.0, 0.0, 0.0};
 			if (key == "Down")
-				move[2] = -0.05;
+				move[2] = +0.08;
 			else
-				move[2] = 0.05;
+				move[2] = -0.08;
 
 			SamplePoly->GetPoint(idx, PickedSampleCoord);
 
@@ -1385,7 +1391,7 @@ int main(int argc, char *argv[])
 	connectionslookupTable->SetNumberOfTableValues(2);
 	connectionslookupTable->SetRange(0.0, 1.0);
 	connectionslookupTable->SetScaleToLinear();
-	connectionslookupTable->SetTableValue(0, 1.0, 0.0, 0.0, 1);
+	connectionslookupTable->SetTableValue(0, 0.0, 1.0, 0.0, 1);
 	connectionslookupTable->SetTableValue(1, 0.0, 0.0, 1.0, 1);
 	connectionslookupTable->Build();
 
@@ -1406,7 +1412,7 @@ int main(int argc, char *argv[])
 	vtkSmartPointer<vtkActor> actor = vtkSmartPointer<vtkActor>::New();
 	actor->SetMapper(mapper);
 	actor->GetProperty()->SetColor(1.0, 0.0, 0.0); //(R,G,B)
-	actor->GetProperty()->SetPointSize(6.0);
+	actor->GetProperty()->SetPointSize(5.0);
 
 	renderer->AddActor(actor);
 
@@ -1449,7 +1455,7 @@ int main(int argc, char *argv[])
 	actor_tumor->SetMapper(mapper_tumor);
 	actor_tumor->GetProperty()->SetColor(0.0, 1.0, 0.0); //(R,G,B)
 	//	actor2->GetProperty()->SetOpacity(0.5);
-	renderer->AddActor(actor_tumor);
+	//renderer->AddActor(actor_tumor);
 
 
 	renderer->SetBackground(1.0, 1.0, 1.0);
